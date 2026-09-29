@@ -455,17 +455,31 @@ Selected checkpoint:
 
 Exit: [x] notebook runs from a clean Kaggle session and produces a reusable checkpoint.
 
-### Stage 2: Re-ID Evaluation — In Progress
+### Stage 2: Re-ID Evaluation — Completed
 
 - [x] Implement restricted checkpoint loading and strict OSNet reconstruction.
 - [x] Implement BGR crop preprocessing and unit-normalized embedding extraction.
-- [ ] Extract and save query/gallery embeddings with the project inference API.
-- [ ] Calculate Rank-k and mAP independently from the training engine.
-- [ ] Save example good and bad retrievals.
+- [x] Extract and save query/gallery embeddings with the project inference API.
+- [x] Calculate Rank-k and mAP independently from the training engine.
+- [x] Save example good and bad retrievals.
 
-Exit: [ ] metrics and visual examples are reproducibly saved outside the training loop.
+Independent result: **64.50% mAP, 83.97% Rank-1, 94.12% Rank-5, and 96.59%
+Rank-10** across all 3,368 official queries. The result closely reproduces the
+training-engine metrics while testing the OpenCV application preprocessing path.
 
-### Stage 3: Single-Camera Pipeline — Not Started
+Artifacts are reproducibly saved under `outputs/evaluation/market1501/`:
+
+- query and gallery embeddings in pickle-free NPZ files;
+- checkpoint/dataset provenance with checkpoint SHA-256;
+- JSON metrics and selected retrieval metadata;
+- visually checked good and bad retrieval contact sheets.
+
+The first CUDA extraction and evaluation took 222.16 seconds locally. A
+provenance-validated cached evaluation took 6.15 seconds.
+
+Exit: [x] metrics and visual examples are reproducibly saved outside the training loop.
+
+### Stage 3: Single-Camera Pipeline — Not Started, Ready to Begin
 
 - [ ] YOLO26n detection.
 - [ ] ByteTrack local IDs.
