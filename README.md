@@ -31,7 +31,7 @@ PyTorch should be installed separately using the build appropriate for the targe
 Install this repository and its development tools:
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" -m pip install ".[dev]"
+& python -m pip install ".[dev]"
 ~~~
 
 This repository lives under a Windows path containing Vietnamese characters. Use a normal install as shown above: current setuptools editable installs (`-e`) cannot encode that path into their `.pth` file. Reinstall after changing package source locally; pytest reads directly from `src/`.
@@ -39,8 +39,8 @@ This repository lives under a Windows path containing Vietnamese characters. Use
 ## Verify the Repository
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" -m pytest
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" -m ruff check .
+& python -m pytest
+& python -m ruff check .
 ~~~
 
 ## Download Market-1501
@@ -48,7 +48,7 @@ This repository lives under a Windows path containing Vietnamese characters. Use
 The downloader uses the public Kaggle mirror **pengcw1/market-1501**, extracts it into the Torchreid-compatible layout, and prints integrity statistics.
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" scripts/download_market1501.py --output-dir data/reid/market1501
+& python scripts/download_market1501.py --output-dir data/reid/market1501
 ~~~
 
 Expected layout:
@@ -67,19 +67,19 @@ data/reid/
 Validate configuration and dataset paths without starting training:
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" scripts/train_market1501.py --dry-run
+& python scripts/train_market1501.py --dry-run
 ~~~
 
 Run the one-epoch smoke configuration:
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" scripts/train_market1501.py --smoke
+& python scripts/train_market1501.py --smoke
 ~~~
 
 Run the full configuration:
 
 ~~~powershell
-& "C:\Users\ADMIN\ai_venv\Scripts\python.exe" scripts/train_market1501.py
+& python scripts/train_market1501.py
 ~~~
 
 The default settings are in [configs/train_market1501.yaml](configs/train_market1501.yaml). Training outputs and model checkpoints are ignored by Git.
