@@ -1,1299 +1,626 @@
-# Person Multi-Camera Tracking & Re-Identification
+# Multi-Camera Person Tracking and Re-Identification
 
-## 1. Project Requirement
+## 1. Objective
 
-> **Person Re-identification: nhận diện lại một người qua nhiều camera.**
+Build a system that detects and tracks people in multiple camera views and assigns the same **global identity** to the same person across those views.
 
-The project aims to build a system that can recognize the same person across different camera views.
+The lecturer's requirement is:
 
-The system should eventually demonstrate:
+> Person Re-identification: recognize the same person across multiple cameras.
 
-* Person detection
-* Single-camera tracking
-* Person Re-Identification (Re-ID)
-* Cross-camera identity association
-* Global identity assignment
-* Multiple real camera inputs
-* Optional simulation/demo input
+This is an engineering group project, not a research paper. It does not need a novel model. It must demonstrate sound system design, model training, integration, evaluation, and a convincing multi-camera demo.
 
-The **main research and evaluation should use existing public datasets**.
+## 2. Required Deliverables
 
-Simulation is **not** intended to be a separate dataset-generation or research task. It is only an additional way to demonstrate the finished system.
+1. A reproducible Kaggle or Colab notebook that fine-tunes a person Re-ID model.
+2. Standard Market-1501 Re-ID results: Rank-1, Rank-5, Rank-10, and mAP.
+3. A local application that performs person detection, per-camera tracking, Re-ID embedding extraction, cross-camera association, and global ID assignment.
+4. A reproducible multi-camera evaluation/demo using WILDTRACK.
+5. A live or prerecorded demonstration using two real cameras.
+6. A short report covering architecture, implementation, results, limitations, and team contributions.
 
----
+An optional simulation demonstration may be included after all required work is complete.
 
-# 2. Project Scope
+## 3. Frozen Scope
 
-The project is divided into two parts:
+### Required
 
-### Main research system
+- Two overlapping camera views.
+- Pretrained YOLO detector.
+- ByteTrack for local tracking.
+- OSNet-x0.25 for person Re-ID.
+- Market-1501 for Re-ID training and evaluation.
+- WILDTRACK for multi-camera integration and evaluation.
+- Tracklet-level appearance aggregation.
+- Cosine distance and Hungarian assignment for cross-camera matching.
+- Consistent displayed global IDs across views.
 
-```text
-Existing Dataset
-      ↓
-Detection / Tracking
-      ↓
-Person Re-ID
-      ↓
-Cross-Camera Association
-      ↓
-Evaluation
-```
+### Optional
 
-### Demonstration system
+- A third camera after the two-camera system is stable.
+- BoT-SORT as a local-tracker comparison.
+- A lightweight simulation or virtual-camera demonstration.
+- WILDTRACK calibration and ground-plane geometry.
 
-```text
-Real IP Cameras
-      │
-      ├──→ Same inference pipeline
-      │
-Simulation / Virtual Cameras
-      │
-      └──→ Same inference pipeline
-```
+### Out of Scope
 
-The research system provides quantitative results.
+- Training YOLO or a tracker from scratch.
+- Non-overlapping camera topology and travel-time learning.
+- MSMT17, MTA, DukeMTMC, or another large benchmark during the baseline.
+- Creating a synthetic training dataset.
+- CNN-versus-Transformer or attention research.
+- ROS2, Gazebo, Isaac Sim, complex physics, or distributed processing.
+- Face recognition or identifying a person's real-world name.
 
-The demonstration system shows that the trained pipeline can operate on actual camera streams and, optionally, simulated camera views.
+The baseline must be completed before optional work starts.
 
----
+## 4. Problem Definition
 
-# 3. Overall Architecture
+Each camera produces its own **local IDs**:
 
 ```text
-                 ┌─────────────────────┐
-                 │     Input Sources   │
-                 └──────────┬──────────┘
-                            │
-             ┌──────────────┼──────────────┐
-             │              │              │
-             ▼              ▼              ▼
-        Dataset        Real IP Cam     Simulation
-             │              │              │
-             └──────────────┼──────────────┘
-                            │
-                            ▼
-                  ┌─────────────────┐
-                  │ Person Detector │
-                  │      YOLO       │
-                  └────────┬────────┘
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │ Single-Camera   │
-                  │    Tracking     │
-                  │ ByteTrack /     │
-                  │   BoT-SORT      │
-                  └────────┬────────┘
-                           │
-                     Person Crops
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │   Re-ID Model   │
-                  │ Appearance      │
-                  │   Embedding     │
-                  └────────┬────────┘
-                           │
-                      Embeddings
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │ Cross-Camera    │
-                  │   Association   │
-                  └────────┬────────┘
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │ Global Identity │
-                  │    Assignment   │
-                  └─────────────────┘
+Camera 1 -> Local ID 3
+Camera 2 -> Local ID 8
 ```
 
-The key distinction is:
+Cross-camera association connects them to one **global ID**:
 
 ```text
-Local ID
-    =
-identity maintained within one camera
-
-Global ID
-    =
-identity maintained across multiple cameras
+Camera 1 / Local ID 3 --+
+                         +--> Global ID 17
+Camera 2 / Local ID 8 --+
 ```
 
-Example:
+A global ID means “the system believes these observations belong to the same person in this camera network.” It is not a legal or biometric identity.
 
-```text
-Camera 1 → Local ID 3 → Global ID 17
-Camera 2 → Local ID 8 → Global ID 17
-Camera 3 → Local ID 2 → Global ID 17
-```
+## 5. Fixed Assumptions
 
----
+1. The primary system uses overlapping cameras.
+2. Frames are synchronized or approximately synchronized.
+3. A person may appear in several cameras simultaneously.
+4. Clothing does not change during a sequence.
+5. Each camera owns a separate ByteTrack instance.
+6. All cameras share one Re-ID model.
+7. The first live demo uses two fixed cameras.
+8. Cloud GPU is used for training; the GTX 1650 is used for local inference.
 
-# 4. Main Research Data
+Overlapping views satisfy the assignment without introducing the separate problem of learning travel times between non-overlapping locations.
 
-## 4.1 Use Existing Datasets
+## 6. Verified Datasets
 
-The project should **not require creating a synthetic dataset**.
+### 6.1 Market-1501: Re-ID Training and Evaluation
 
-Instead, use established public datasets for training and evaluation.
+Use Market-1501 to fine-tune OSNet, evaluate image-level Re-ID, and select the association threshold using validation identities taken from the training split.
 
-Possible datasets include:
+Verified source:
 
-### Market-1501
+- Kaggle: <https://www.kaggle.com/datasets/pengcw1/market-1501>
+- Kaggle handle: `pengcw1/market-1501`
+- Approximate download: 146 MB
+- Public and downloadable using KaggleHub
 
-A standard person Re-ID benchmark containing 1,501 identities captured by six cameras, with 32,668 labeled images. It provides a standard training/testing protocol and is useful for establishing the initial Re-ID baseline.
+Locally verified contents:
 
-### MSMT17
+| Split | Images | Identities |
+|---|---:|---:|
+| Training | 12,936 | 751 |
+| Query | 3,368 | 750 |
+| Gallery | 15,913 | 751 including distractors |
 
-A larger and more varied Re-ID dataset containing 4,101 identities captured by 15 cameras, including indoor and outdoor cameras and different time/weather conditions. It can be used for a more challenging experiment.
+The downloaded archive was successfully parsed by Torchreid.
 
-### MTA
-
-MTA is particularly relevant because it contains multi-camera tracking videos and annotations as well as a dedicated Re-ID dataset. Its short extracted version is much smaller than the full dataset and may be more practical for experimentation.
-
-### Other datasets
-
-Depending on availability and licensing:
-
-* CUHK03
-* DukeMTMC-reID where legally/technically available
-* MARS
-* Other established MTMC/Re-ID benchmarks
-
-The exact dataset combination should be selected based on:
-
-1. Dataset availability
-2. Licensing
-3. GPU/storage requirements
-4. Whether camera IDs are available
-5. Whether person identities are shared across cameras
-6. Whether video/track information is available
-
----
-
-# 5. Dataset Roles
-
-Not every dataset needs to perform every role.
-
-A clean setup is:
-
-```text
-Re-ID Dataset
-     ↓
-Train / fine-tune Re-ID model
-```
-
-and:
-
-```text
-Multi-camera Dataset
-     ↓
-Evaluate cross-camera identity association
-```
-
-and, if necessary:
-
-```text
-MOT Dataset
-     ↓
-Evaluate single-camera tracking
-```
-
-For example:
-
-```text
-Market-1501
-    ↓
-Re-ID baseline training
-
-MTA / another MTMC dataset
-    ↓
-Multi-camera evaluation
-
-Real IP cameras
-    ↓
-Final demonstration
-```
-
-This separation prevents the project from becoming unnecessarily complicated.
-
----
-
-# 6. Person Detection
-
-The detector answers:
-
-> "Where are the people in this frame?"
-
-Input:
-
-```text
-Image
-```
-
-Output:
-
-```text
-Person
-├── bounding box
-├── confidence
-└── class = person
-```
-
-## Recommended approach
-
-Use a pretrained YOLO model.
-
-Do **not** train a detector from scratch initially.
-
-The detector is infrastructure for the Re-ID system rather than the primary research contribution.
-
-The exact YOLO model size should be selected according to:
-
-* detection quality
-* FPS
-* GPU memory
-* number of simultaneous cameras
-
-Since the target machine is a GTX 1650, start with a relatively small model.
-
----
-
-# 7. Single-Camera Tracking
-
-The tracker answers:
-
-> "Is this person in the current frame the same person I saw a few frames ago?"
-
-Example:
-
-```text
-Frame 001 → Person ID 4
-Frame 002 → Person ID 4
-Frame 003 → Person ID 4
-```
-
-This is **local tracking**, not Re-ID.
-
-## Candidate trackers
-
-### ByteTrack
-
-Use as the first baseline.
-
-Advantages:
-
-* relatively lightweight
-* simple pipeline
-* good baseline for static cameras
-* does not require a separate appearance model
-
-### BoT-SORT
-
-Use as an optional comparison.
-
-BoT-SORT can incorporate appearance/Re-ID information and camera-motion compensation. Ultralytics currently supports both ByteTrack and BoT-SORT for tracking.
-
-Initial pipeline:
-
-```text
-YOLO
- ↓
-ByteTrack
- ↓
-Local Track IDs
-```
-
-Optional comparison:
-
-```text
-YOLO
- ↓
-BoT-SORT
- ↓
-Local Track IDs
-```
-
-The project does **not** need to train the tracker from scratch.
-
----
-
-# 8. Person Re-Identification
-
-This is the **main ML/research component**.
-
-The Re-ID model answers:
-
-> "Is this person the same person that appeared in another camera?"
-
-A detected person crop is converted into an embedding:
-
-```text
-Person Crop
-     ↓
-Re-ID Network
-     ↓
-Embedding Vector
-```
-
-Example:
-
-```text
-Person A - Camera 1
-        ↓
-      Vector A
-
-Person A - Camera 2
-        ↓
-      Vector B
-
-distance(A, B) → small
-```
-
-For different people:
-
-```text
-Person A → Vector A
-Person B → Vector B
-
-distance(A, B) → larger
-```
-
----
-
-# 9. Re-ID Model Architecture
-
-## Baseline
-
-Start with a CNN-based architecture.
-
-Example:
-
-```text
-Person Crop
-    ↓
-ResNet-style CNN
-    ↓
-Global Pooling
-    ↓
-Embedding Layer
-    ↓
-Feature Vector
-```
-
-CNN is sufficient for the initial project.
-
-Attention is **optional**, not a requirement.
-
-Possible research extension:
-
-```text
-CNN
-vs
-CNN + Attention
-```
-
-This gives a clear baseline-versus-improvement experiment without making the initial system unnecessarily complicated.
-
----
-
-# 10. Re-ID Training
-
-The Re-ID model is the main component that should be trained/fine-tuned.
-
-A practical approach:
-
-```text
-ImageNet-pretrained CNN
-        ↓
-Re-ID architecture
-        ↓
-Train / fine-tune on Re-ID dataset
-        ↓
-Person embeddings
-```
-
-Possible objectives:
-
-### Classification loss
-
-Train the model to classify identities in the training set.
-
-### Triplet loss
-
-Encourage:
-
-```text
-same person
-    ↓
-closer embeddings
-
-different person
-    ↓
-farther embeddings
-```
-
-A possible baseline is:
-
-```text
-Cross-Entropy Loss
-+
-Triplet Loss
-```
-
-The exact loss configuration should be finalized after the baseline is running.
-
----
-
-# 11. Important Training Clarification
-
-The project uses **staged development**, but it does not require staged training of every component.
-
-### YOLO
-
-```text
-Pretrained
-↓
-Use directly
-```
-
-Fine-tune only if necessary.
-
-### Tracker
-
-```text
-ByteTrack / BoT-SORT
-↓
-Use directly
-```
-
-No custom tracker training initially.
-
-### Re-ID
-
-```text
-Pretrained backbone
-↓
-Fine-tune / train Re-ID head
-```
-
-This is the main training component.
-
-### Cross-camera association
-
-```text
-Embeddings
-↓
-Similarity / association algorithm
-```
-
-Initially this does not require neural-network training.
-
----
-
-# 12. Cross-Camera Association
-
-After local tracking and Re-ID:
-
-```text
-Camera 1
-Local ID 3
-Embedding A
-
-Camera 2
-Local ID 8
-Embedding B
-```
-
-Calculate similarity:
-
-```text
-cosine_similarity(A, B)
-```
-
-If the similarity is sufficiently high:
-
-```text
-Camera 1 / Local ID 3
-          │
-          ▼
-      Global ID 17
-          ▲
-          │
-Camera 2 / Local ID 8
-```
-
-Otherwise, the system can create a new global identity.
-
----
-
-# 13. Baseline Association Algorithm
-
-Start simple:
-
-```text
-Re-ID embedding
-       ↓
-Cosine similarity
-       ↓
-Threshold
-       ↓
-Same identity / New identity
-```
-
-Do not immediately build a sophisticated graph neural network or transformer-based association system.
-
-The baseline must work first.
-
----
-
-# 14. Possible Association Improvements
-
-After the baseline works, additional information can be incorporated.
-
-## 14.1 Tracklet-Level Embedding
-
-Instead of relying on one frame:
-
-```text
-Frame 1 → embedding
-Frame 2 → embedding
-Frame 3 → embedding
-Frame 4 → embedding
-```
-
-Aggregate:
-
-```text
-Tracklet
-   ↓
-Feature aggregation
-   ↓
-Stable embedding
-```
-
-Compare:
-
-```text
-Single-frame Re-ID
-vs
-Tracklet-level Re-ID
-```
-
-This is a potentially useful research experiment.
-
----
-
-## 14.2 Temporal Constraints
-
-If a person leaves Camera A:
-
-```text
-Camera A
-    ↓
-person disappears
-    ↓
-reasonable travel time
-    ↓
-Camera B
-```
-
-The association system can use this temporal information.
-
-An identity appearing in Camera B immediately after leaving a physically distant Camera A may receive a lower association score.
-
----
-
-## 14.3 Camera Topology
-
-Represent possible camera transitions:
-
-```text
-Camera A ─── Camera B
-    │
-    └────── Camera C
-```
-
-This can reduce obviously impossible cross-camera matches.
-
----
-
-# 15. Real IP Camera Demonstration
-
-The final system should support multiple real camera streams.
-
-Possible sources:
-
-```text
-IP Camera 1 → RTSP / HTTP
-IP Camera 2 → RTSP / HTTP
-IP Camera 3 → RTSP / HTTP
-```
-
-or:
-
-```text
-USB Webcam 1
-USB Webcam 2
-USB Webcam 3
-```
-
-OpenCV can initially handle the input streams.
-
-Each stream should be normalized into a common representation:
+Kaggle/Colab download:
 
 ```python
-FramePacket(
-    camera_id,
-    frame_id,
-    timestamp,
-    frame
+!pip install -q kagglehub
+
+import kagglehub
+
+market_root = kagglehub.dataset_download(
+    "pengcw1/market-1501",
+    output_dir="/content/data/market1501",
 )
+print(market_root)
 ```
 
-This keeps the downstream pipeline independent of the camera source.
+On Kaggle, use `/kaggle/working/data/market1501`.
 
----
-
-# 16. Multi-Camera Processing
-
-Each camera should maintain its own local tracking state:
+Expected structure:
 
 ```text
-Camera 1 → Tracker 1
-Camera 2 → Tracker 2
-Camera 3 → Tracker 3
+Market-1501-v15.09.15/
+├── bounding_box_train/
+├── bounding_box_test/
+└── query/
 ```
 
-The global association system then connects the local identities:
+Rules:
+
+- Use the original images, not background-modified derivatives.
+- Keep the official query/gallery protocol for final metrics.
+- Do not redistribute or commit the dataset.
+- The Kaggle mirror has no clear license metadata; use it only for this non-commercial educational project and cite the original Market-1501 paper.
+
+### 6.2 WILDTRACK: Multi-Camera Integration and Evaluation
+
+Use WILDTRACK to replay real synchronized views, test independent trackers, evaluate cross-camera association against persistent person IDs, and optionally use calibration later.
+
+References:
+
+- Project page: <https://www.epfl.ch/labs/cvlab/data/data-wildtrack/>
+- Official toolkit: <https://github.com/Chavdarova/WILDTRACK-toolkit>
+
+Programmatic mirror:
+
+- Hugging Face: <https://huggingface.co/datasets/disl/my_dataset>
+- Repository ID: `disl/my_dataset`
+- Ungated public download
+- Approximate size: 7.67 GB
+
+Locally verified:
+
+- 1920x1080 images;
+- seven synchronized views;
+- JSON frame annotations;
+- persistent `personID`;
+- per-camera bounding boxes under `views`;
+- camera calibration XML files.
+
+One downloaded annotation contained 38 people with seven camera-view entries and parsed successfully.
+
+Kaggle/Colab download:
+
+```python
+!pip install -q huggingface_hub
+
+from huggingface_hub import snapshot_download
+
+wildtrack_root = snapshot_download(
+    repo_id="disl/my_dataset",
+    repo_type="dataset",
+    local_dir="/content/data/wildtrack",
+    allow_patterns=[
+        "Wildtrack_dataset_full/Wildtrack_dataset/Image_subsets/**",
+        "Wildtrack_dataset_full/Wildtrack_dataset/annotations_positions/**",
+        "Wildtrack_dataset_full/Wildtrack_dataset/calibrations/**",
+    ],
+)
+print(wildtrack_root)
+```
+
+Start with cameras `C1` and `C2`. Add `C3` only after the two-camera pipeline works.
+
+Rules:
+
+- The Hugging Face repository is a mirror, not the authoritative publisher.
+- Cite the original WILDTRACK paper and project.
+- Do not commit or redistribute the images.
+- Recheck the authoritative source terms before publishing dataset-derived media outside the class submission.
+
+### 6.3 Real Camera Data
+
+Use two USB webcams, phones acting as IP cameras, prerecorded files, or RTSP cameras with overlapping views.
+
+- Obtain consent from everyone recorded.
+- Do not record uninvolved people in public spaces.
+- Delete recordings when they are no longer required.
+- Treat team recordings as demonstration data, not a training benchmark.
+
+## 7. Why Other Datasets Are Deferred
+
+- **MSMT17:** much larger and harder than necessary for the baseline.
+- **MTA:** relevant, but access requires contacting the maintainer, accepting research-only conditions, and owning GTA V; the full archive is also large.
+- **DukeMTMC:** avoided because of access and redistribution concerns.
+- **Custom synthetic data:** unnecessary because simulation is only a final visual input source.
+
+## 8. Architecture
 
 ```text
-Tracker 1
-   │
-Tracker 2 ───→ Global Association
-   │
-Tracker 3
+                    Input adapters
+       +----------------+----------------+
+       |                |                |
+       v                v                v
+ WILDTRACK frames   Real cameras   Simulation (optional)
+       |                |                |
+       +----------------+----------------+
+                        |
+       +----------------+----------------+
+       |                                 |
+       v                                 v
+ Camera 1: YOLO -> ByteTrack   Camera 2: YOLO -> ByteTrack
+       |                                 |
+       v                                 v
+ Local tracklets + crops        Local tracklets + crops
+       |                                 |
+       +---------------+-----------------+
+                       v
+                 Shared OSNet
+                       v
+             Tracklet embeddings
+                       v
+       Cosine distance + Hungarian matching
+                       v
+               Global ID registry
+                       v
+          Visualization and evaluation
 ```
 
-This is important because:
+## 9. Fixed Technology Choices
 
-> **Local tracking and global Re-ID are two different problems.**
+| Component | Choice |
+|---|---|
+| Language | Python 3.12 |
+| Deep learning | PyTorch |
+| Detector | Ultralytics YOLO26n |
+| Local tracker | ByteTrack |
+| Re-ID framework | Torchreid |
+| Re-ID model | OSNet-x0.25 |
+| Re-ID input | 256x128 RGB crops |
+| Similarity | Cosine distance |
+| Assignment | Hungarian algorithm |
+| Video input | OpenCV with FFmpeg |
+| Re-ID metrics | Torchreid evaluator |
+| MOT metrics | Motmetrics |
+| Cloud training | Kaggle or Google Colab |
+| Local GPU | NVIDIA GTX 1650 4 GB |
 
----
+BoT-SORT may be tested later, but ByteTrack remains the baseline.
 
-# 17. Simulation / Virtual Camera Demonstration
+## 10. Common Input Interface
 
-Simulation is **not a required research dataset**.
+Every source produces the same object:
 
-It is only a demonstration input source.
+```python
+from dataclasses import dataclass
+import numpy as np
 
-The goal is simply to show:
+@dataclass
+class FramePacket:
+    camera_id: str
+    frame_id: int
+    timestamp: float
+    frame: np.ndarray
+```
+
+Planned adapters:
+
+- `WildtrackSource`
+- `VideoFileSource`
+- `RtspCameraSource`
+- `WebcamSource`
+- `SimulationSource` (optional)
+
+Downstream components must not depend on where a frame originated.
+
+## 11. Re-ID Training
+
+### Model and Loss
+
+- OSNet-x0.25 with ImageNet initialization
+- 512-dimensional embedding
+- 256x128 inputs
+- Cross-entropy identity classification plus triplet loss
+
+### Initial Configuration
+
+| Setting | Initial value |
+|---|---|
+| Optimizer | Adam |
+| Learning rate | 0.0003 |
+| Batch size | 32; reduce to 16 on memory error |
+| Epochs | 60 maximum |
+| Precision | Mixed precision when supported |
+| Checkpoint | Best validation mAP |
+| Random seed | Fixed and recorded |
+
+First run a one-epoch smoke test. Adjust settings only after measuring it.
+
+Create validation identities from the training split. Never tune thresholds or hyperparameters on the official query/gallery test result.
+
+Save the final checkpoint as:
 
 ```text
-Virtual Camera 1
-        ↓
-Person appears
-        ↓
-Virtual Camera 2
-        ↓
-Same Global ID
+checkpoints/osnet_x0_25_market1501_best.pth
 ```
 
-A lightweight virtual environment is sufficient.
+Checkpoints must not be committed to Git.
 
-Possible options:
+## 12. Per-Camera Pipeline
 
-* Blender
-* BlenderProc
-* lightweight 3D scene
-* prerecorded multi-camera video
-
-The project does **not** need:
-
-* ROS2
-* Gazebo
-* Isaac Sim
-* complex physics
-* robotics simulation
-* synthetic dataset generation
-
-unless a later requirement specifically demands them.
-
----
-
-# 18. Same Pipeline for Dataset, Camera, and Simulation
-
-The system should be designed around a common input interface:
+Each camera owns:
 
 ```text
-                    Input Adapter
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-        ▼                ▼                ▼
-    Dataset          Real IP Cam      Simulation
-        │                │                │
-        └────────────────┼────────────────┘
-                         ▼
-                     YOLO
-                         ↓
-                     Tracker
-                         ↓
-                    Person Crop
-                         ↓
-                      Re-ID
-                         ↓
-                  Global Association
-                         ↓
-                    Global IDs
+Camera state
+├── input adapter
+├── ByteTrack instance
+├── frame counter
+├── active local tracks
+└── recent embeddings per local track
 ```
 
-This means simulation does not require a separate AI pipeline.
+For every frame:
 
-It simply provides frames to the same system.
+1. Read a `FramePacket`.
+2. Run YOLO for the person class only.
+3. Update that camera's ByteTrack instance.
+4. Clip bounding boxes to the frame.
+5. Reject invalid, tiny, or low-confidence crops.
+6. Extract Re-ID embeddings periodically.
+7. Update each local tracklet representation.
 
----
+Never share one ByteTrack object between cameras.
 
-# 19. Development Stages
+## 13. Tracklet Embeddings
 
-## Stage 0 — Environment
+A single crop is noisy. For each local track:
 
-Install and verify:
+1. L2-normalize every valid embedding.
+2. Keep the latest 5-10 embeddings.
+3. Average them.
+4. L2-normalize the average.
+
+Extract an embedding every few frames rather than every frame to reduce GPU cost.
+
+## 14. Cross-Camera Association
+
+At each association interval:
+
+1. Collect active tracklets from each camera.
+2. Build a cosine-distance matrix for every camera pair.
+3. Reject pairs with excessive timestamp difference, too few valid crops, or appearance distance above the calibrated threshold.
+4. Run Hungarian one-to-one assignment.
+5. Merge accepted tracks into the same global identity.
+6. Assign new global IDs to unmatched tracks.
+7. Keep inactive identities for a short configurable TTL.
+
+Because cameras overlap, one global identity may be active in several cameras simultaneously.
+
+Thresholds must be selected using validation identities or a WILDTRACK development split, not the final test result.
 
 ```text
-Python
-PyTorch
-OpenCV
-Ultralytics
-Re-ID framework/model
-CUDA
+GlobalIdentity
+├── global_id
+├── member tracks: (camera_id, local_id)
+├── aggregated embedding
+├── first_seen
+├── last_seen
+└── active cameras
 ```
 
-Verify GPU compatibility with the GTX 1650.
+## 15. Evaluation
 
----
+### Re-ID on Market-1501
 
-## Stage 1 — Re-ID Dataset
+- Rank-1
+- Rank-5
+- Rank-10
+- mAP
 
-Select one established Re-ID dataset.
+Use the official query/gallery protocol.
 
-Recommended initial candidate:
+### Local Tracking on WILDTRACK
+
+Evaluate each selected camera:
+
+- IDF1
+- MOTA
+- ID switches
+
+### Cross-Camera Association
+
+Use WILDTRACK `personID` to calculate:
+
+- association precision;
+- association recall;
+- association F1;
+- global ID switches;
+- global ID fragmentation.
+
+Distinguish detector/tracker errors from association errors.
+
+### System Performance
+
+Measure latency, FPS, GPU memory, CPU use, dropped frames, and two-camera throughput. Record image size, camera count, model, and hardware with every result.
+
+## 16. Development Stages
+
+### Stage 0: Repository and Environment
+
+- Initialize Git and add `.gitignore`.
+- Record dependencies.
+- Verify CUDA, YOLO, ByteTrack, Torchreid, OpenCV, and FFmpeg.
+
+Exit: all smoke tests pass.
+
+### Stage 1: Market-1501 Training Notebook
+
+- Download the dataset in code.
+- Run one smoke-training epoch.
+- Run full cloud training.
+- Save the best checkpoint and training curves.
+
+Exit: notebook runs from a clean Kaggle/Colab session.
+
+### Stage 2: Re-ID Evaluation
+
+- Extract query/gallery embeddings.
+- Calculate Rank-k and mAP.
+- Save example good and bad retrievals.
+
+Exit: metrics and visual examples are saved.
+
+### Stage 3: Single-Camera Pipeline
+
+- YOLO26n detection.
+- ByteTrack local IDs.
+- Valid person crops.
+- Video visualization.
+
+Exit: one video runs without tracker-state or crop errors.
+
+### Stage 4: Re-ID Integration
+
+- Load the trained OSNet checkpoint.
+- Extract embeddings from track crops.
+- Maintain tracklet averages.
+
+Exit: same-track embeddings are more similar than different-track embeddings in a small diagnostic.
+
+### Stage 5: WILDTRACK Two-Camera Pipeline
+
+- Download WILDTRACK in code.
+- Start with C1 and C2.
+- Read synchronized frames and annotations.
+- Run independent trackers.
+
+Exit: both views replay through the common pipeline.
+
+### Stage 6: Global Association
+
+- Build distance matrices.
+- Add Hungarian assignment.
+- Maintain the global registry.
+- Tune the threshold on development data.
+
+Exit: matched people show the same global ID and color across C1 and C2.
+
+### Stage 7: Evaluation
+
+- Generate Re-ID, local tracking, cross-camera association, and runtime results.
+
+Exit: results are reproducible and exported for the report.
+
+### Stage 8: Real Two-Camera Demo
+
+- Connect two webcams, phones, files, or RTSP streams.
+- Use overlapping views.
+- Display local and global IDs.
+- Test entry, exit, partial occlusion, and simultaneous visibility.
+
+Exit: a stable demonstration is recorded.
+
+### Stage 9: Optional Simulation Demo
+
+Only begin after Stage 8 succeeds.
+
+- Use Blender, prerecorded virtual-camera footage, or another lightweight scene.
+- Provide two virtual camera streams through `SimulationSource`.
+- Reuse the same detector, tracker, Re-ID, association, and visualization code.
+
+Simulation is presentation material, not a training dataset, physics project, or separate AI pipeline.
+
+## 17. Proposed Repository Structure
 
 ```text
-Market-1501
+Multi_Cam_ReID/
+├── plan.md
+├── README.md
+├── requirements.txt
+├── configs/
+│   ├── train_market1501.yaml
+│   └── system.yaml
+├── notebooks/
+│   ├── train_market1501.ipynb
+│   └── evaluate_reid.ipynb
+├── src/multicam_reid/
+│   ├── inputs/
+│   ├── detection/
+│   ├── tracking/
+│   ├── reid/
+│   ├── association/
+│   ├── evaluation/
+│   └── visualization/
+├── scripts/
+│   ├── download_market1501.py
+│   ├── download_wildtrack.py
+│   ├── run_wildtrack.py
+│   └── run_live.py
+├── tests/
+├── data/          # Git-ignored
+├── checkpoints/   # Git-ignored
+├── outputs/       # Git-ignored
+└── runs/          # Git-ignored
 ```
 
-because it is relatively manageable and provides a standard multi-camera Re-ID benchmark.
-
-Train/fine-tune the first Re-ID model.
-
----
-
-## Stage 2 — Re-ID Evaluation
-
-Evaluate:
-
-```text
-Rank-1
-Rank-5
-Rank-10
-mAP
-```
-
-Make sure the Re-ID model works independently before integrating the entire multi-camera system.
-
----
-
-## Stage 3 — Person Detection
-
-Run:
-
-```text
-YOLO
- ↓
-Person bounding boxes
-```
-
-Test on:
-
-* dataset frames
-* recorded video
-* real camera
-
----
-
-## Stage 4 — Single-Camera Tracking
-
-Build:
-
-```text
-YOLO
- ↓
-ByteTrack
- ↓
-Local Track IDs
-```
-
-Evaluate:
-
-* tracking stability
-* ID switches
-* occlusion
-* entering/leaving the scene
-
----
-
-## Stage 5 — Integrate Re-ID
-
-Build:
-
-```text
-YOLO
- ↓
-ByteTrack
- ↓
-Person Crop
- ↓
-Re-ID
- ↓
-Embedding
-```
-
----
-
-## Stage 6 — Cross-Camera Association
-
-Build:
-
-```text
-Camera 1 Tracklets
-        ↓
-    Embeddings
-        ↓
-  Global Matcher
-        ↑
-    Embeddings
-        ↑
-Camera 2 Tracklets
-```
-
-Start with:
-
-```text
-Cosine similarity
-+
-threshold
-```
-
----
-
-## Stage 7 — Multi-Camera Dataset Evaluation
-
-Use a dataset with actual multi-camera sequences/annotations.
-
-For example, MTA provides multi-camera tracking annotations and Re-ID data, making it useful for testing the complete concept rather than only isolated image Re-ID.
-
----
-
-## Stage 8 — Real Camera Demonstration
-
-Connect:
-
-```text
-2 IP cameras
-```
-
-first.
-
-Then increase to:
-
-```text
-3 cameras
-```
-
-if the hardware can maintain an acceptable FPS.
-
-Demonstrate:
-
-```text
-Person enters Camera 1
-        ↓
-Global ID 17
-
-Person leaves Camera 1
-        ↓
-Person appears Camera 2
-        ↓
-Global ID 17
-```
-
----
-
-## Stage 9 — Simulation Demonstration
-
-Only after the real/dataset pipeline works.
-
-Create or use a simple virtual scene:
-
-```text
-Camera A
-Camera B
-Several people
-```
-
-Demonstrate the same global identity association.
-
-The simulation is **presentation/demo material**, not a new research dataset.
-
----
-
-# 20. Evaluation
-
-Evaluation should separate the different components.
-
-## Re-ID
-
-Use:
-
-* Rank-1
-* Rank-5
-* Rank-10
-* mAP
-
-These are standard metrics for person Re-ID.
-
----
-
-## Tracking
-
-Possible metrics:
-
-* IDF1
-* MOTA
-* HOTA
-* ID switches
-
----
-
-## Cross-Camera Association
-
-Measure:
-
-* correct identity matches
-* false matches
-* missed matches
-* global ID consistency
-* identity switches
-
----
-
-## System Performance
-
-Measure:
-
-```text
-FPS
-Latency
-GPU memory
-CPU usage
-Number of simultaneous cameras
-```
-
-The GTX 1650 should be treated as an actual system constraint.
-
----
-
-# 21. Final Demonstration
-
-The final demonstration should contain two or three parts.
-
-## Demo 1 — Research Dataset
-
-Show:
-
-```text
-Dataset
- ↓
-Re-ID
- ↓
-Cross-camera matching
- ↓
-Metrics
-```
-
-This demonstrates quantitative performance.
-
----
-
-## Demo 2 — Real IP Cameras
-
-Show:
-
-```text
-Camera 1 ─┐
-Camera 2 ─┼→ Detection → Tracking → Re-ID → Global IDs
-Camera 3 ─┘
-```
-
-Example:
-
-```text
-Camera 1:
-Person #17
-
-Camera 2:
-Person #17
-
-Camera 3:
-Person #17
-```
-
-This demonstrates practical multi-camera operation.
-
----
-
-## Demo 3 — Simulation
+## 18. Minimum Acceptable Submission
+
+If time becomes limited, submit:
+
+1. Market-1501 training notebook.
+2. Rank-1 and mAP evaluation.
+3. YOLO26n + ByteTrack on two WILDTRACK cameras.
+4. OSNet tracklet embeddings.
+5. Cosine distance + Hungarian global association.
+6. A recorded two-camera real or prerecorded demo.
+7. Results and limitations.
+
+Simulation and the third camera are the first items to remove if the schedule slips.
+
+## 19. Known Limitations
+
+- Similar clothing can confuse appearance Re-ID.
+- Market-1501 and WILDTRACK do not perfectly represent the team's cameras.
+- Occlusion and small crops reduce embedding quality.
+- Local ByteTrack errors propagate into global association.
+- WILDTRACK does not test non-overlapping travel-time reasoning.
+- The GTX 1650 may require lower resolution, less frequent embedding extraction, or sequential processing.
+- The system cannot prove a person's real identity.
+
+## 20. Data and Privacy Rules
+
+- Do not commit datasets, weights, credentials, or RTSP URLs.
+- Obtain consent from recorded participants.
+- Avoid filming uninvolved people.
+- Retain recordings only as long as needed.
+- Document dataset citations and source URLs.
+- Do not redistribute Market-1501 or WILDTRACK with the repository.
+
+## 21. Acceptance Criteria
+
+- [ ] Market-1501 downloads from code in a clean cloud notebook.
+- [ ] OSNet-x0.25 training produces a reusable checkpoint.
+- [ ] Rank-1, Rank-5, Rank-10, and mAP are reported.
+- [ ] WILDTRACK downloads from code and annotations parse correctly.
+- [ ] Two cameras run independent YOLO + ByteTrack pipelines.
+- [ ] Tracklets produce aggregated embeddings.
+- [ ] Cross-camera matching uses cosine distance and Hungarian assignment.
+- [ ] The same person receives the same displayed global ID across views.
+- [ ] WILDTRACK association results and runtime measurements are reported.
+- [ ] A two-camera real or prerecorded demonstration is recorded.
+- [ ] Setup and reproduction instructions are present.
 
 Optional:
 
-```text
-Virtual Camera 1
-       ↓
-Virtual Camera 2
-       ↓
-Same global identity
-```
+- [ ] A simulation source runs through the same pipeline.
+- [ ] A third camera is demonstrated.
+- [ ] BoT-SORT is compared with ByteTrack.
 
-The purpose is to make the multi-camera concept easy to visualize.
-
-It is **not** intended to prove that the simulator is physically realistic.
-
----
-
-# 22. Research Experiments
-
-Once the baseline works, choose one or two focused experiments.
-
-## Experiment A — Re-ID Architecture
+## 22. Final Summary
 
 ```text
-CNN baseline
-vs
-CNN + Attention
+Market-1501
+    -> fine-tune and evaluate OSNet-x0.25
+
+WILDTRACK C1 + C2
+    -> YOLO26n
+    -> independent ByteTrack instances
+    -> person crops
+    -> tracklet embeddings
+    -> cosine distance
+    -> Hungarian assignment
+    -> global IDs
+    -> quantitative evaluation
+
+Two real cameras
+    -> the same inference pipeline
+    -> practical demonstration
+
+Optional simulation
+    -> SimulationSource adapter
+    -> the same inference pipeline
+    -> presentation-only demonstration
 ```
 
----
+Guiding rule:
 
-## Experiment B — Frame-Level vs Tracklet-Level
-
-```text
-Single-frame embedding
-vs
-Tracklet aggregation
-```
-
----
-
-## Experiment C — Association Strategy
-
-```text
-Appearance only
-vs
-Appearance + temporal constraints
-```
-
----
-
-## Experiment D — Dataset Generalization
-
-For example:
-
-```text
-Train on Dataset A
-        ↓
-Test on Dataset B
-```
-
-This tests how well the Re-ID representation generalizes to a different camera environment.
-
----
-
-# 23. Minimum Viable Project
-
-If time becomes limited, implement:
-
-```text
-Existing Re-ID Dataset
-        ↓
-Re-ID Model
-        ↓
-Evaluation
-```
-
-then:
-
-```text
-YOLO
- ↓
-ByteTrack
- ↓
-Person Crop
- ↓
-Re-ID
- ↓
-Cosine Similarity
- ↓
-Global ID
-```
-
-and finally:
-
-```text
-2 real IP cameras
-```
-
-for the live demonstration.
-
-Simulation remains optional.
-
-This is already enough to address the core requirement.
-
----
-
-# 24. Out of Scope
-
-The following should **not** be part of the initial project:
-
-* Creating a custom synthetic Re-ID dataset
-* Building a complete simulation environment
-* ROS2
-* Gazebo
-* Isaac Sim
-* Complex physics
-* 3D reconstruction
-* Full camera calibration
-* Distributed multi-machine processing
-* Detector training from scratch
-* Tracker training from scratch
-* Giant end-to-end MTMC Transformer
-* Custom CUDA kernels
-* Complicated camera synchronization
-
-These can be considered only if the project requirements later demand them.
-
----
-
-# 25. Final Architecture
-
-The intended research system is:
-
-```text
-              EXISTING DATASET
-                     │
-                     ▼
-              Re-ID Training
-                     │
-                     ▼
-              ┌──────────────┐
-              │  Re-ID Model │
-              └──────┬───────┘
-                     │
-                     ▼
-        ┌──────────────────────────┐
-        │ Multi-Camera Application │
-        └────────────┬─────────────┘
-                     │
-          ┌──────────┼──────────┐
-          ▼          ▼          ▼
-       Camera 1   Camera 2   Camera 3
-          │          │          │
-          ▼          ▼          ▼
-        YOLO       YOLO       YOLO
-          │          │          │
-          ▼          ▼          ▼
-       Tracker    Tracker    Tracker
-          │          │          │
-          └──────────┼──────────┘
-                     │
-                     ▼
-               Person Crops
-                     │
-                     ▼
-                  Re-ID
-                     │
-                     ▼
-              Embeddings
-                     │
-                     ▼
-          Cross-Camera Association
-                     │
-                     ▼
-                Global IDs
-```
-
-Additional inputs:
-
-```text
-Existing Dataset ────────────────┐
-Real IP Cameras ─────────────────┼→ Same Pipeline
-Simulation / Virtual Cameras ────┘
-```
-
----
-
-# 26. Project Philosophy
-
-The project should follow:
-
-```text
-Use existing data
-       ↓
-Build a working baseline
-       ↓
-Measure it
-       ↓
-Find one weakness
-       ↓
-Improve one component
-       ↓
-Measure again
-       ↓
-Demonstrate on real cameras
-```
-
-The project is **not**:
-
-```text
-Build simulator
-+
-Generate dataset
-+
-Train detector
-+
-Train tracker
-+
-Train Re-ID
-+
-Build giant model
-+
-Build robotics stack
-```
-
-The core research question remains:
-
-> **Can the system reliably recognize and maintain the identity of the same person across different camera views?**
-
-Therefore:
-
-* **Existing datasets** → research/training/evaluation
-* **YOLO** → detection infrastructure
-* **ByteTrack/BoT-SORT** → local tracking infrastructure
-* **Re-ID model** → main learned component
-* **Cross-camera association** → global identity logic
-* **Real IP cameras** → practical demonstration
-* **Simulation** → optional visual demonstration
-
-This keeps the project focused on **Person Re-Identification**, while still producing a convincing multi-camera system demo.
+> Complete and measure a simple end-to-end system before adding another model, camera, dataset, or simulator.
