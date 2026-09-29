@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Jupyter and IDE files
+.ipynb_checkpoints/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Datasets and recordings
+data/
+datasets/
+recordings/
+*.mp4
+*.avi
+*.mkv
+*.mov
+
+# Models and generated artifacts
+checkpoints/
+weights/
+runs/
+outputs/
+artifacts/
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Logs and profiling
+*.log
+logs/
+*.prof
