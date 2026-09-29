@@ -5,6 +5,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
 
 # Virtual environments and local configuration
 .venv/
@@ -22,9 +27,9 @@ env/
 Thumbs.db
 
 # Datasets and recordings
-data/
-datasets/
-recordings/
+/data/
+/datasets/
+/recordings/
 *.mp4
 *.avi
 *.mkv

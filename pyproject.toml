@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multicam-reid"
+version = "0.1.0"
+description = "Multi-camera person tracking and re-identification course project"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "gdown==6.4.0",
+    "huggingface-hub==1.18.0",
+    "kagglehub==1.0.2",
+    "lap==0.5.13",
+    "motmetrics==1.4.0",
+    "numpy>=1.26,<3",
+    "opencv-python==4.10.0.84",
+    "psutil==7.1.0",
+    "PyYAML==6.0.3",
+    "torchreid==0.2.5",
+    "ultralytics==8.4.64",
+    "yacs==0.1.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.9",
+]
+
+[project.scripts]
+multicam-download-market1501 = "multicam_reid.data.market1501:main"
+multicam-train-reid = "multicam_reid.training.market1501:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "--strict-markers",
+    "-ra",
+    "--cov=multicam_reid",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+]
+markers = [
+    "integration: requires external data or services",
+    "slow: takes noticeably longer than a unit test",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["multicam_reid"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
