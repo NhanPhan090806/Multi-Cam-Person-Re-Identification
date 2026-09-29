@@ -424,88 +424,104 @@ Measure latency, FPS, GPU memory, CPU use, dropped frames, and two-camera throug
 
 ## 16. Development Stages
 
-### Stage 0: Repository and Environment
+Progress last updated: **2026-09-30**.
 
-- Initialize Git and add `.gitignore`.
-- Record dependencies.
-- Verify CUDA, YOLO, ByteTrack, Torchreid, OpenCV, and FFmpeg.
+- `[x]` completed and verified
+- `[~]` in progress
+- `[ ]` not started
 
-Exit: all smoke tests pass.
+### Stage 0: Repository and Environment — Completed
 
-### Stage 1: Market-1501 Training Notebook
+- [x] Initialize Git and add `.gitignore`.
+- [x] Record dependencies.
+- [x] Verify CUDA, YOLO, ByteTrack, Torchreid, OpenCV, and FFmpeg.
 
-- Download the dataset in code.
-- Run one smoke-training epoch.
-- Run full cloud training.
-- Save the best checkpoint and training curves.
+Exit: [x] all smoke tests pass.
 
-Exit: notebook runs from a clean Kaggle/Colab session.
+### Stage 1: Market-1501 Training Notebook — Completed
 
-### Stage 2: Re-ID Evaluation
+- [x] Download and validate the dataset in code.
+- [x] Run one smoke-training epoch.
+- [x] Run the full 60-epoch Kaggle training job.
+- [x] Preserve checkpoints, TensorBoard events, and the complete training log.
+- [x] Verify `model.pth.tar-60` loads strictly on Windows and produces a finite
+  512-dimensional embedding.
 
-- Extract query/gallery embeddings.
-- Calculate Rank-k and mAP.
-- Save example good and bad retrievals.
+Result: **64.6% mAP, 84.0% Rank-1, 94.1% Rank-5, and 96.6% Rank-10** on the
+official Market-1501 query/gallery protocol.
 
-Exit: metrics and visual examples are saved.
+Selected checkpoint:
+`outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60`.
 
-### Stage 3: Single-Camera Pipeline
+Exit: [x] notebook runs from a clean Kaggle session and produces a reusable checkpoint.
 
-- YOLO26n detection.
-- ByteTrack local IDs.
-- Valid person crops.
-- Video visualization.
+### Stage 2: Re-ID Evaluation — In Progress
 
-Exit: one video runs without tracker-state or crop errors.
+- [x] Implement restricted checkpoint loading and strict OSNet reconstruction.
+- [x] Implement BGR crop preprocessing and unit-normalized embedding extraction.
+- [ ] Extract and save query/gallery embeddings with the project inference API.
+- [ ] Calculate Rank-k and mAP independently from the training engine.
+- [ ] Save example good and bad retrievals.
 
-### Stage 4: Re-ID Integration
+Exit: [ ] metrics and visual examples are reproducibly saved outside the training loop.
 
-- Load the trained OSNet checkpoint.
-- Extract embeddings from track crops.
-- Maintain tracklet averages.
+### Stage 3: Single-Camera Pipeline — Not Started
 
-Exit: same-track embeddings are more similar than different-track embeddings in a small diagnostic.
+- [ ] YOLO26n detection.
+- [ ] ByteTrack local IDs.
+- [ ] Valid person crops.
+- [ ] Video visualization.
 
-### Stage 5: WILDTRACK Two-Camera Pipeline
+Exit: [ ] one video runs without tracker-state or crop errors.
 
-- Download WILDTRACK in code.
-- Start with C1 and C2.
-- Read synchronized frames and annotations.
-- Run independent trackers.
+### Stage 4: Re-ID Integration — Foundation Ready
 
-Exit: both views replay through the common pipeline.
+- [x] Load the trained OSNet checkpoint.
+- [ ] Extract embeddings from actual ByteTrack person crops.
+- [ ] Maintain tracklet averages.
 
-### Stage 6: Global Association
+Exit: [ ] same-track embeddings are more similar than different-track embeddings in a small diagnostic.
 
-- Build distance matrices.
-- Add Hungarian assignment.
-- Maintain the global registry.
-- Tune the threshold on development data.
+### Stage 5: WILDTRACK Two-Camera Pipeline — Not Started
 
-Exit: matched people show the same global ID and color across C1 and C2.
+- [ ] Download WILDTRACK in code.
+- [ ] Start with C1 and C2.
+- [ ] Read synchronized frames and annotations.
+- [ ] Run independent trackers.
 
-### Stage 7: Evaluation
+Exit: [ ] both views replay through the common pipeline.
 
-- Generate Re-ID, local tracking, cross-camera association, and runtime results.
+### Stage 6: Global Association — Not Started
 
-Exit: results are reproducible and exported for the report.
+- [ ] Build distance matrices.
+- [ ] Add Hungarian assignment.
+- [ ] Maintain the global registry.
+- [ ] Tune the threshold on development data.
 
-### Stage 8: Real Two-Camera Demo
+Exit: [ ] matched people show the same global ID and color across C1 and C2.
 
-- Connect two webcams, phones, files, or RTSP streams.
-- Use overlapping views.
-- Display local and global IDs.
-- Test entry, exit, partial occlusion, and simultaneous visibility.
+### Stage 7: Evaluation — Not Started
 
-Exit: a stable demonstration is recorded.
+- [ ] Generate Re-ID, local tracking, cross-camera association, and runtime results.
 
-### Stage 9: Optional Simulation Demo
+Exit: [ ] results are reproducible and exported for the report.
+
+### Stage 8: Real Two-Camera Demo — Not Started
+
+- [ ] Connect two webcams, phones, files, or RTSP streams.
+- [ ] Use overlapping views.
+- [ ] Display local and global IDs.
+- [ ] Test entry, exit, partial occlusion, and simultaneous visibility.
+
+Exit: [ ] a stable demonstration is recorded.
+
+### Stage 9: Optional Simulation Demo — Not Started
 
 Only begin after Stage 8 succeeds.
 
-- Use Blender, prerecorded virtual-camera footage, or another lightweight scene.
-- Provide two virtual camera streams through `SimulationSource`.
-- Reuse the same detector, tracker, Re-ID, association, and visualization code.
+- [ ] Use Blender, prerecorded virtual-camera footage, or another lightweight scene.
+- [ ] Provide two virtual camera streams through `SimulationSource`.
+- [ ] Reuse the same detector, tracker, Re-ID, association, and visualization code.
 
 Simulation is presentation material, not a training dataset, physics project, or separate AI pipeline.
 
@@ -577,9 +593,9 @@ Simulation and the third camera are the first items to remove if the schedule sl
 
 ## 21. Acceptance Criteria
 
-- [ ] Market-1501 downloads from code in a clean cloud notebook.
-- [ ] OSNet-x0.25 training produces a reusable checkpoint.
-- [ ] Rank-1, Rank-5, Rank-10, and mAP are reported.
+- [x] Market-1501 downloads from code in a clean cloud notebook.
+- [x] OSNet-x0.25 training produces a reusable checkpoint.
+- [x] Rank-1, Rank-5, Rank-10, and mAP are reported.
 - [ ] WILDTRACK downloads from code and annotations parse correctly.
 - [ ] Two cameras run independent YOLO + ByteTrack pipelines.
 - [ ] Tracklets produce aggregated embeddings.
@@ -587,7 +603,7 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - [ ] The same person receives the same displayed global ID across views.
 - [ ] WILDTRACK association results and runtime measurements are reported.
 - [ ] A two-camera real or prerecorded demonstration is recorded.
-- [ ] Setup and reproduction instructions are present.
+- [x] Setup and reproduction instructions are present.
 
 Optional:
 

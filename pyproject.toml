@@ -33,6 +33,7 @@ dev = [
 [project.scripts]
 multicam-download-market1501 = "multicam_reid.data.market1501:main"
 multicam-train-reid = "multicam_reid.training.market1501:main"
+multicam-verify-reid = "multicam_reid.reid.encoder:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

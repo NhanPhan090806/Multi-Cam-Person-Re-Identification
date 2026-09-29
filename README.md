@@ -11,7 +11,8 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 - [x] Typed Torchreid training configuration
 - [x] One-epoch smoke-training mode
 - [x] Kaggle/Colab training notebook
-- [ ] Full Market-1501 cloud training
+- [x] Full Market-1501 cloud training
+- [x] Safe checkpoint loading and normalized crop embeddings
 - [ ] Standalone Re-ID evaluation
 - [ ] YOLO + ByteTrack camera pipeline
 - [ ] Cross-camera global association
@@ -84,9 +85,36 @@ Run the full configuration:
 
 The default settings are in [configs/train_market1501.yaml](configs/train_market1501.yaml). Training outputs and model checkpoints are ignored by Git.
 
+## Verify the Trained Re-ID Checkpoint
+
+The epoch-60 checkpoint is the selected model: 64.6% mAP, 84.0% Rank-1, 94.1% Rank-5, and 96.6% Rank-10. Verify that it loads and produces a unit-normalized embedding:
+
+~~~powershell
+& python scripts/verify_reid_checkpoint.py
+~~~
+
+To encode a real OpenCV-compatible person crop instead of the synthetic smoke-test crop:
+
+~~~powershell
+& python scripts/verify_reid_checkpoint.py --image path/to/person_crop.jpg
+~~~
+
+The application API accepts OpenCV BGR crops and returns 512-dimensional unit vectors:
+
+~~~python
+from pathlib import Path
+
+from multicam_reid.reid import ReIDEncoder
+
+encoder = ReIDEncoder.from_checkpoint(
+    Path("outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60")
+)
+embedding = encoder.encode_one(person_crop_bgr)
+~~~
+
 ## Cloud Training
 
-Open [notebooks/train_market1501.ipynb](notebooks/train_market1501.ipynb) in Kaggle or Colab. The notebook:
+Use [train_market1501_kaggle.ipynb](train_market1501_kaggle.ipynb) on Kaggle, or [train_market1501.ipynb](train_market1501.ipynb) when the repository is already available locally. The notebooks:
 
 1. verifies GPU availability;
 2. installs the repository package;
