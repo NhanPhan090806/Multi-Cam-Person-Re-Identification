@@ -142,6 +142,8 @@ def test_global_runner_writes_assignment_and_merge_evidence(tmp_path: Path) -> N
     assignments = [json.loads(line) for line in assignment_lines]
     assert len(assignments) == 4
     assert {row["global_id"] for row in assignments} == {1}
+    assert assignments[0]["xyxy"] == [4.0, 3.0, 28.0, 45.0]
+    assert assignments[0]["confidence"] == 0.9
     merges = [json.loads(line) for line in (output / "merge_events.jsonl").read_text().splitlines()]
     assert len(merges) == 1
     assert merges[0]["survivor_global_id"] == 1

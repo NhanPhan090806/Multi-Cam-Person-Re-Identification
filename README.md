@@ -478,6 +478,59 @@ global_id = result.assignments[track_key]
 That separation matters for Stage 8: the EPFL source can be replaced by two
 IP-camera workers while the association policy and global registry stay the same.
 
+## Run Stage 7 Evaluation
+
+Stage 7 does not train another model and does not alter Stage 6 IDs. It is an
+offline measurement module: it takes `assignments.jsonl` from a completed Stage
+6 run, projects each tracked bounding-box footpoint onto the EPFL ground plane,
+matches predictions to the sparse identity-labelled positions, and scores the
+result. This separation makes evaluation quick to repeat without running YOLO,
+ByteTrack, or OSNet again.
+
+Run the full sequence once with the frozen Stage 6 settings:
+
+~~~powershell
+python scripts/run_global_epfl.py `
+  --dataset-root data/epfl_lab `
+  --output-dir outputs/stage6/epfl_lab_full `
+  --cameras C0 C1 `
+  --device cuda `
+  --no-video
+~~~
+
+Then evaluate its saved assignments:
+
+~~~powershell
+python scripts/evaluate_epfl_global.py `
+  --dataset-root data/epfl_lab `
+  --stage6-run-dir outputs/stage6/epfl_lab_full `
+  --output-dir outputs/stage7/epfl_lab_full `
+  --cameras C0 C1 `
+  --max-ground-distance-cells 5 `
+  --market1501-metrics outputs/evaluation/market1501/metrics.json
+~~~
+
+The evaluator writes `metrics.json` (complete machine-readable results and
+SHA-256 provenance), `attributions.jsonl` (track-to-person matches and rejected
+predictions), `contingency.csv` (person/global-ID counts), and `report.md` (a
+short report-ready summary).
+
+The verified full C0/C1 run processed 2,955 synchronized frames (5,910 camera
+frames) in 246.80 seconds: 11.97 synchronized pairs/s or 23.95 camera frames/s.
+At the 119 annotated frames, 761/860 eligible observations were spatially
+attributed and 450/476 scene-person opportunities were covered. Cross-camera
+association reached **65.5% precision, 69.1% recall, and 67.3% F1** (215 TP, 113
+FP, 96 FN). This beats both deliberately trivial baselines: cameras kept wholly
+separate score 0 F1, while assigning everyone one ID scores 35.5% F1.
+
+The result is usable but not strong. There were 118 sparse local-ID switches and
+115 sparse global-ID switches; ByteTrack fragmentation is therefore a major
+upstream limitation, and OSNet/global association only repairs part of it. EPFL
+provides sparse scene-level ground positions rather than per-camera boxes and
+visibility flags, so these are calibrated project metrics—not official
+MOTChallenge MOTA or IDF1 scores. The Stage 6 cosine threshold remained frozen
+at 0.35; the reporting sequence was not used for repeated threshold tuning.
+
 ## Cloud Training
 
 Use [train_market1501_kaggle.ipynb](train_market1501_kaggle.ipynb) on Kaggle, or [train_market1501.ipynb](train_market1501.ipynb) when the repository is already available locally. The notebooks:

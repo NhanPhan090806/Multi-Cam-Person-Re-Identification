@@ -569,11 +569,42 @@ threshold must not be repeatedly tuned on the eventual reporting window.
 
 Exit: [x] matched people show the same global ID and color across C0 and C1.
 
-### Stage 7: Evaluation — Not Started
+### Stage 7: Evaluation — Completed
 
-- [ ] Generate Re-ID, local tracking, cross-camera association, and runtime results.
+- [x] Extend Stage 6 assignment logs with bounding boxes and confidence under a
+  versioned schema.
+- [x] Project bounding-box footpoints through EPFL camera calibration onto the
+  annotated ground grid.
+- [x] Attribute predictions to persistent identities with Hungarian one-to-one
+  matching and a frozen five-cell spatial gate.
+- [x] Report attribution/coverage guardrails, cross-camera precision/recall/F1,
+  local and global switches/fragmentation, global purity, and trivial baselines.
+- [x] Preserve complete JSON/JSONL/CSV/Markdown artifacts with input SHA-256
+  provenance and the independent Market-1501 Re-ID result.
+- [x] Run the complete 2,955-frame C0/C1 sequence without rendering video.
 
-Exit: [ ] results are reproducible and exported for the report.
+Verified full-sequence result:
+
+- 2,955 synchronized pairs / 5,910 camera frames in 246.80 seconds;
+- 11.97 synchronized pairs/s and 23.95 camera frames/s;
+- 761/860 eligible predictions spatially attributed (88.5%);
+- 450/476 labelled scene-person opportunities covered (94.5%);
+- cross-camera association: 215 TP, 113 FP, 96 FN, **65.5% precision, 69.1%
+  recall, and 67.3% F1**;
+- separate-camera baseline: 0 F1; single-global-ID baseline: 35.5% F1;
+- 118 sparse local-ID switches versus 115 sparse global-ID switches, showing
+  that local tracker fragmentation is the main upstream weakness;
+- global cluster purity 73.6%, with 76 sparse global fragmentations.
+
+The evaluation is conditional on calibrated spatial attribution because EPFL
+supplies sparse scene-level ground positions, not per-camera boxes or visibility
+labels. The results must not be called MOTChallenge MOTA/IDF1. The Stage 6
+cosine-distance threshold remained frozen at 0.35 for this report.
+
+Reproducible artifacts are saved under `outputs/stage7/epfl_lab_full/` as
+`metrics.json`, `attributions.jsonl`, `contingency.csv`, and `report.md`.
+
+Exit: [x] results are reproducible and exported for the report.
 
 ### Stage 8: Real Two-Camera Demo — Not Started
 
@@ -672,7 +703,7 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - [x] Tracklets produce aggregated embeddings.
 - [x] Cross-camera matching uses cosine distance and Hungarian assignment.
 - [x] The same person receives the same displayed global ID across views.
-- [ ] EPFL association results and runtime measurements are reported.
+- [x] EPFL association results and runtime measurements are reported.
 - [ ] A two-camera real or prerecorded demonstration is recorded.
 - [x] Setup and reproduction instructions are present.
 

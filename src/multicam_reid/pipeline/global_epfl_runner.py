@@ -95,6 +95,7 @@ class GlobalEpflRunSummary:
     global_identities_final: int
     global_ids_issued: int
     merge_events: int
+    assignment_schema_version: int
     threshold: float
     min_stored_samples: int
     max_idle_frames: int
@@ -221,8 +222,12 @@ def run_global_epfl(
                     camera_counts["local_ids"].update(
                         track.local_id for track in stage3.tracks
                     )
+                    track_by_local_id = {
+                        track.local_id: track for track in stage3.tracks
+                    }
                     for appearance in result.appearances:
                         global_id = association_result.assignments[appearance.key]
+                        track = track_by_local_id[appearance.key.local_id]
                         camera_counts["global_ids"].add(global_id)
                         assignments_file.write(
                             json.dumps(
@@ -234,6 +239,8 @@ def run_global_epfl(
                                     "global_id": global_id,
                                     "stored_samples": appearance.stored_samples,
                                     "total_samples": appearance.total_samples,
+                                    "xyxy": list(track.xyxy),
+                                    "confidence": track.confidence,
                                 }
                             )
                             + "\n"
@@ -320,6 +327,7 @@ def run_global_epfl(
         global_identities_final=len(association),
         global_ids_issued=association.total_ids_issued,
         merge_events=merge_count,
+        assignment_schema_version=2,
         threshold=config.association.max_cosine_distance,
         min_stored_samples=config.association.min_stored_samples,
         max_idle_frames=config.association.max_idle_frames,
