@@ -38,6 +38,8 @@ multicam-evaluate-reid = "multicam_reid.evaluation.market1501:main"
 multicam-run-single-camera = "multicam_reid.pipeline.video_runner:main"
 multicam-run-ip-webcams = "multicam_reid.pipeline.ip_webcams:main"
 multicam-run-reid-diagnostic = "multicam_reid.pipeline.reid_diagnostic:main"
+multicam-download-wildtrack = "multicam_reid.data.wildtrack:main"
+multicam-run-wildtrack = "multicam_reid.pipeline.wildtrack_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

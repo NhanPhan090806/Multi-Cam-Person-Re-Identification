@@ -2,5 +2,12 @@
 
 from multicam_reid.inputs.ip_camera import IpCameraConfig, IpCameraWorker
 from multicam_reid.inputs.video import VideoFileSource
+from multicam_reid.inputs.wildtrack import WildtrackSource, WildtrackSynchronizedFrame
 
-__all__ = ["IpCameraConfig", "IpCameraWorker", "VideoFileSource"]
+__all__ = [
+    "IpCameraConfig",
+    "IpCameraWorker",
+    "VideoFileSource",
+    "WildtrackSource",
+    "WildtrackSynchronizedFrame",
+]

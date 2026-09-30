@@ -524,14 +524,29 @@ Verified two-person diagnostic:
 
 Exit: [x] same-track embeddings are more similar than different-track embeddings in a controlled diagnostic.
 
-### Stage 5: WILDTRACK Two-Camera Pipeline — Not Started
+### Stage 5: WILDTRACK Two-Camera Pipeline — Completed
 
-- [ ] Download WILDTRACK in code.
-- [ ] Start with C1 and C2.
-- [ ] Read synchronized frames and annotations.
-- [ ] Run independent trackers.
+- [x] Download only WILDTRACK C1/C2, annotations, and calibrations in code.
+- [x] Validate all 400 annotation-aligned 1920x1080 timestamps at 2 FPS.
+- [x] Parse persistent `personID`, `positionID`, visibility, and per-camera boxes.
+- [x] Emit synchronized C1/C2 `FramePacket` objects through the common interface.
+- [x] Share one YOLO detector while assigning independent ByteTrack state to C1
+  and C2.
 
-Exit: [ ] both views replay through the common pipeline.
+Verified full-sequence replay:
+
+- 400 synchronized timestamps / 800 camera frames processed in 73.01 seconds;
+- 5.48 synchronized pairs/s and 10.96 camera frames/s on the GTX 1650;
+- 9,518 person annotations containing 306 persistent IDs visible in C1 or C2;
+- C1: 8,223 detections, 2,962 track observations/crops, 188 local IDs;
+- C2: 7,378 detections, 3,814 track observations/crops, 224 local IDs;
+- a 20-timestamp annotated C1/C2 preview saved for visual inspection.
+
+The high number of local IDs reflects fragmentation in a crowded sequence
+sampled at only 2 FPS. It is not presented as a tracking-accuracy result;
+quantitative tracker diagnosis and tuning remain in Stage 7.
+
+Exit: [x] both views replay through independent common pipelines.
 
 ### Stage 6: Global Association — Not Started
 
@@ -638,8 +653,8 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - [x] Market-1501 downloads from code in a clean cloud notebook.
 - [x] OSNet-x0.25 training produces a reusable checkpoint.
 - [x] Rank-1, Rank-5, Rank-10, and mAP are reported.
-- [ ] WILDTRACK downloads from code and annotations parse correctly.
-- [ ] Two cameras run independent YOLO + ByteTrack pipelines.
+- [x] WILDTRACK downloads from code and annotations parse correctly.
+- [x] Two cameras run independent YOLO + ByteTrack pipelines.
 - [x] Tracklets produce aggregated embeddings.
 - [ ] Cross-camera matching uses cosine distance and Hungarian assignment.
 - [ ] The same person receives the same displayed global ID across views.
