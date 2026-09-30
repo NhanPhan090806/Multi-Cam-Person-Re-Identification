@@ -6,11 +6,12 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
-from multicam_reid.pipeline.single_camera import PersonCrop
+if TYPE_CHECKING:
+    from multicam_reid.pipeline.single_camera import PersonCrop
 
 
 class CropEncoder(Protocol):

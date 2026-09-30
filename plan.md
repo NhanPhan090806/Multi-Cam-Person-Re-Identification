@@ -540,14 +540,34 @@ test and the dataset remains recoverable by its downloader.
 
 Exit: [x] both sparse views replay through independent common pipelines.
 
-### Stage 6: Global Association — Not Started
+### Stage 6: Global Association — Completed
 
-- [ ] Build distance matrices.
-- [ ] Add Hungarian assignment.
-- [ ] Maintain the global registry.
-- [ ] Tune the threshold on development data.
+- [x] Build labeled cosine-distance matrices from rolling tracklet embeddings.
+- [x] Add threshold-gated Hungarian one-to-one assignment for each camera pair.
+- [x] Maintain a global registry with persistent local mappings, a 250-frame
+  inactive appearance gallery, and deterministic ID merges.
+- [x] Prevent a merge if it would contain two simultaneously active tracks from
+  the same camera.
+- [x] Freeze the initial threshold at cosine distance 0.35 and require two stored
+  OSNet samples before matching.
+- [x] Display the same global ID and color in synchronized C0/C1 views.
+- [x] Export per-frame assignments, merge events, settings, and runtime evidence.
 
-Exit: [ ] matched people show the same global ID and color across C0 and C1.
+Verified two-person development replay, source frames 400-549:
+
+- 150 synchronized pairs / 300 camera frames in 11.20 seconds;
+- 13.40 synchronized pairs/s and 26.79 camera frames/s;
+- two main identities matched across C0 and C1 as Global 1 and Global 3;
+- Global 3 reattached after C1 ByteTrack changed local ID 3 to local ID 12;
+- three accepted merge events at cosine distances 0.304, 0.318, and 0.226;
+- six provisional IDs issued, three final registry identities; the extra final
+  identity was a transient four-observation C0 local track.
+
+The frame-400 window is development evidence for integration and visual
+inspection. It is not the final unbiased Stage 7 accuracy result, and the
+threshold must not be repeatedly tuned on the eventual reporting window.
+
+Exit: [x] matched people show the same global ID and color across C0 and C1.
 
 ### Stage 7: Evaluation — Not Started
 
@@ -650,8 +670,8 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - [x] EPFL Laboratory downloads from code and identity positions parse correctly.
 - [x] Two cameras run independent YOLO + ByteTrack pipelines.
 - [x] Tracklets produce aggregated embeddings.
-- [ ] Cross-camera matching uses cosine distance and Hungarian assignment.
-- [ ] The same person receives the same displayed global ID across views.
+- [x] Cross-camera matching uses cosine distance and Hungarian assignment.
+- [x] The same person receives the same displayed global ID across views.
 - [ ] EPFL association results and runtime measurements are reported.
 - [ ] A two-camera real or prerecorded demonstration is recorded.
 - [x] Setup and reproduction instructions are present.

@@ -17,7 +17,7 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 - [x] YOLO + ByteTrack single-camera pipeline
 - [x] OSNet embeddings and rolling averages for actual ByteTrack tracklets
 - [x] Sparse synchronized EPFL Laboratory C0/C1 replay with independent local trackers
-- [ ] Cross-camera global association
+- [x] Cross-camera global association with auditable global-ID logs and video
 
 ## Environment
 
@@ -334,9 +334,9 @@ for appearance in result.appearances:
     print(appearance.key, appearance.embedding.shape, appearance.stored_samples)
 ~~~
 
-`appearance.key` is only `(camera_id, local_id)`. Stage 6 will compare these
-rolling vectors across cameras and assign global IDs; OSNet itself does not
-perform that decision.
+`appearance.key` is only `(camera_id, local_id)`. Stage 6 compares these rolling
+vectors across cameras and assigns global IDs; OSNet itself does not perform
+that decision.
 
 Run Stage 4's isolated unit tests without invoking the repository-wide coverage
 gate:
@@ -398,13 +398,85 @@ detections and 231 track observations, while C1 produced 325 detections and 275
 track observations. A single YOLO detector is shared, but C0 and C1 still own
 separate ByteTrack state and local-ID namespaces.
 
-This stage still does not assign cross-camera global IDs. Stage 6 will combine
-this synchronized input with Stage 4 OSNet tracklet embeddings, cosine distance,
+This stage still does not assign cross-camera global IDs. Stage 6 combines this
+synchronized input with Stage 4 OSNet tracklet embeddings, cosine distance,
 Hungarian matching, and a global identity registry.
 
 The older WILDTRACK downloader and runner remain available as optional crowd
 stress-test tools. Their 2.06 GiB local download was removed after this migration
 and can be recovered by rerunning `scripts/download_wildtrack.py`.
+
+## Run Stage 6 Global Association
+
+Stage 6 is the first complete multi-camera Re-ID pipeline. For every synchronized
+instant it runs:
+
+~~~text
+C0/C1 frames -> YOLO -> separate ByteTrack instances -> person crops
+             -> shared OSNet -> rolling tracklet embeddings
+             -> cosine-distance matrices -> Hungarian one-to-one matches
+             -> global-ID registry -> matching labels/colors in both views
+~~~
+
+Run the verified two-person development window:
+
+~~~powershell
+python scripts/run_global_epfl.py `
+  --dataset-root data/epfl_lab `
+  --output-dir outputs/stage6/epfl_lab_dev_400_549 `
+  --cameras C0 C1 `
+  --device cuda `
+  --start-frame 400 `
+  --max-frames 150 `
+  --display
+~~~
+
+The default cosine-distance threshold is `0.35`, equivalent to requiring cosine
+similarity of at least `0.65`. A tracklet needs two stored OSNet samples before
+it may merge with another identity. Hungarian assignment makes matches one to
+one for each camera pair, and the registry refuses any merge that would put two
+simultaneously active tracks from the same camera into one global identity.
+Inactive identities remain available for 250 source frames so an interrupted or
+returning track can reattach.
+
+The output directory contains:
+
+- `C0_global_ids.mp4` and `C1_global_ids.mp4`: separate annotated views;
+- `synchronized_global_ids.mp4`: side-by-side evidence at the same source time;
+- `assignments.jsonl`: one machine-readable local-to-global assignment per
+  visible appearance and frame;
+- `merge_events.jsonl`: every accepted merge, its track keys, frame, and cosine
+  distance;
+- `summary.json`: settings, counts, output paths, and measured throughput.
+
+In the verified 150-pair run, 300 camera frames were processed in 11.20 seconds
+(26.79 camera frames/s). The two main people were assigned consistently across
+C0 and C1 as Global 1 and Global 3. Global 3 also survived a C1 ByteTrack switch
+from local 3 to local 12. Six provisional numeric IDs were issued and three
+cross-camera merges left three final identities; the third was a four-frame C0
+local track, illustrating that detector/tracker fragmentation propagates into
+global association. These are Stage 6 development observations, not final
+association precision/recall; Stage 7 will attribute tracks to EPFL ground truth
+before reporting quantitative accuracy.
+
+The reusable association module is independent of EPFL:
+
+~~~python
+from multicam_reid.association import AssociationConfig, GlobalIdentityRegistry
+
+registry = GlobalIdentityRegistry(
+    AssociationConfig(max_cosine_distance=0.35, min_stored_samples=2)
+)
+result = registry.update(
+    appearances_from_all_cameras,
+    frame_id=source_frame_id,
+    timestamp=source_timestamp,
+)
+global_id = result.assignments[track_key]
+~~~
+
+That separation matters for Stage 8: the EPFL source can be replaced by two
+IP-camera workers while the association policy and global registry stay the same.
 
 ## Cloud Training
 
