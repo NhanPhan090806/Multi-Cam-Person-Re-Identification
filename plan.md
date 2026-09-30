@@ -15,7 +15,7 @@ This is an engineering group project, not a research paper. It does not need a n
 1. A reproducible Kaggle or Colab notebook that fine-tunes a person Re-ID model.
 2. Standard Market-1501 Re-ID results: Rank-1, Rank-5, Rank-10, and mAP.
 3. A local application that performs person detection, per-camera tracking, Re-ID embedding extraction, cross-camera association, and global ID assignment.
-4. A reproducible multi-camera evaluation/demo using WILDTRACK.
+4. A reproducible sparse multi-camera evaluation/demo using EPFL Laboratory.
 5. A live or prerecorded demonstration using two real cameras.
 6. A short report covering architecture, implementation, results, limitations, and team contributions.
 
@@ -30,7 +30,7 @@ An optional simulation demonstration may be included after all required work is 
 - ByteTrack for local tracking.
 - OSNet-x0.25 for person Re-ID.
 - Market-1501 for Re-ID training and evaluation.
-- WILDTRACK for multi-camera integration and evaluation.
+- EPFL Laboratory six-person sequence for multi-camera integration and evaluation.
 - Tracklet-level appearance aggregation.
 - Cosine distance and Hungarian assignment for cross-camera matching.
 - Consistent displayed global IDs across views.
@@ -40,7 +40,8 @@ An optional simulation demonstration may be included after all required work is 
 - A third camera after the two-camera system is stable.
 - BoT-SORT as a local-tracker comparison.
 - A lightweight simulation or virtual-camera demonstration.
-- WILDTRACK calibration and ground-plane geometry.
+- WILDTRACK as an optional crowd stress test.
+- EPFL calibration and ground-plane geometry beyond appearance-only matching.
 
 ### Out of Scope
 
@@ -141,61 +142,42 @@ Rules:
 - Do not redistribute or commit the dataset.
 - The Kaggle mirror has no clear license metadata; use it only for this non-commercial educational project and cite the original Market-1501 paper.
 
-### 6.2 WILDTRACK: Multi-Camera Integration and Evaluation
+### 6.2 EPFL Laboratory: Multi-Camera Integration and Evaluation
 
-Use WILDTRACK to replay real synchronized views, test independent trackers, evaluate cross-camera association against persistent person IDs, and optionally use calibration later.
+Use the EPFL Laboratory six-person sequence to replay real synchronized views,
+test independent trackers, and debug cross-camera association against persistent
+identity-labelled ground-grid positions. People enter the room sequentially, so
+the sequence grows from one person to at most six instead of beginning with a
+dense crowd.
 
-References:
+Authoritative source:
 
-- Project page: <https://www.epfl.ch/labs/cvlab/data/data-wildtrack/>
-- Official toolkit: <https://github.com/Chavdarova/WILDTRACK-toolkit>
+- Project page: <https://www.epfl.ch/labs/cvlab/data/data-pom-index-php/>
+- Four synchronized ordinary-perspective cameras at 25 FPS.
+- Direct HTTPS video, calibration, and ground-truth downloads with no account.
+- Research use is allowed with citation; the data must not be redistributed.
 
-Programmatic mirror:
+Locally verified C0/C1 subset:
 
-- Hugging Face: <https://huggingface.co/datasets/disl/my_dataset>
-- Repository ID: `disl/my_dataset`
-- Ungated public download
-- Approximate size: 7.67 GB
+- 2,955 synchronized 360x288 frames at 25 FPS;
+- 119 labelled timestamps at one-second intervals;
+- six persistent identity columns and 476 active position labels;
+- maximum six simultaneous people;
+- ground-plane and head-plane calibration for C0/C1;
+- 155,830,968 bytes on disk, approximately 149 MiB.
 
-Locally verified:
+Download in code:
 
-- 1920x1080 images;
-- seven synchronized views;
-- JSON frame annotations;
-- persistent `personID`;
-- per-camera bounding boxes under `views`;
-- camera calibration XML files.
-
-One downloaded annotation contained 38 people with seven camera-view entries and parsed successfully.
-
-Kaggle/Colab download:
-
-```python
-!pip install -q huggingface_hub
-
-from huggingface_hub import snapshot_download
-
-wildtrack_root = snapshot_download(
-    repo_id="disl/my_dataset",
-    repo_type="dataset",
-    local_dir="/content/data/wildtrack",
-    allow_patterns=[
-        "Wildtrack_dataset_full/Wildtrack_dataset/Image_subsets/**",
-        "Wildtrack_dataset_full/Wildtrack_dataset/annotations_positions/**",
-        "Wildtrack_dataset_full/Wildtrack_dataset/calibrations/**",
-    ],
-)
-print(wildtrack_root)
+```powershell
+python scripts/download_epfl_lab.py `
+  --output-dir data/epfl_lab `
+  --cameras C0 C1
 ```
 
-Start with cameras `C1` and `C2`. Add `C3` only after the two-camera pipeline works.
-
-Rules:
-
-- The Hugging Face repository is a mirror, not the authoritative publisher.
-- Cite the original WILDTRACK paper and project.
-- Do not commit or redistribute the images.
-- Recheck the authoritative source terms before publishing dataset-derived media outside the class submission.
+Use C0 and C1 for the baseline because they show the same room from different
+angles and both include full ground/head homographies. Keep WILDTRACK code only
+as an optional crowd stress test; its 2.06 GiB C1/C2 local download was removed
+after the EPFL migration.
 
 ### 6.3 Real Camera Data
 
@@ -220,7 +202,7 @@ Use two USB webcams, phones acting as IP cameras, prerecorded files, or RTSP cam
        +----------------+----------------+
        |                |                |
        v                v                v
- WILDTRACK frames   Real cameras   Simulation (optional)
+ EPFL Lab frames    Real cameras   Simulation (optional)
        |                |                |
        +----------------+----------------+
                         |
@@ -284,7 +266,8 @@ class FramePacket:
 
 Planned adapters:
 
-- `WildtrackSource`
+- `EpflLabSource`
+- `WildtrackSource` (optional stress test)
 - `VideoFileSource`
 - `IpCameraWorker` for HTTP/HTTPS MJPEG and RTSP streams
 - `WebcamSource`
@@ -375,7 +358,8 @@ At each association interval:
 
 Because cameras overlap, one global identity may be active in several cameras simultaneously.
 
-Thresholds must be selected using validation identities or a WILDTRACK development split, not the final test result.
+Appearance thresholds must be selected using Market-1501 validation identities,
+not repeatedly tuned against the final EPFL reporting window.
 
 ```text
 GlobalIdentity
@@ -398,17 +382,16 @@ GlobalIdentity
 
 Use the official query/gallery protocol.
 
-### Local Tracking on WILDTRACK
+### Local Tracking on EPFL Laboratory
 
-Evaluate each selected camera:
-
-- IDF1
-- MOTA
-- ID switches
+EPFL does not provide ready-made per-camera bounding boxes. Diagnose local
+tracking with the rendered videos and track-fragmentation counts first. Stage 7
+may project detections onto the calibrated ground grid and attribute them to the
+identity-labelled positions at the 119 annotated timestamps.
 
 ### Cross-Camera Association
 
-Use WILDTRACK `personID` to calculate:
+Use EPFL persistent identity columns and calibrated ground positions to calculate:
 
 - association precision;
 - association recall;
@@ -497,7 +480,7 @@ Verified diagnostic run:
 - 15.74 processing FPS on the GTX 1650 for a 12 FPS, 640x360 input.
 
 This diagnostic uses a simple generated moving-person video to verify system
-wiring. Difficult real-footage tracking remains part of WILDTRACK and the live
+wiring. Difficult real-footage tracking remains part of EPFL Laboratory and the live
 demo stages. The IP-webcam reconnect, isolation, and multi-camera orchestration
 are unit tested with simulated streams. The user has also confirmed that one
 Android IP Webcam stream works live; simultaneous two-camera hardware validation
@@ -524,29 +507,38 @@ Verified two-person diagnostic:
 
 Exit: [x] same-track embeddings are more similar than different-track embeddings in a controlled diagnostic.
 
-### Stage 5: WILDTRACK Two-Camera Pipeline — Completed
+### Stage 5: Sparse EPFL Laboratory Two-Camera Pipeline — Completed
 
-- [x] Download only WILDTRACK C1/C2, annotations, and calibrations in code.
-- [x] Validate all 400 annotation-aligned 1920x1080 timestamps at 2 FPS.
-- [x] Parse persistent `personID`, `positionID`, visibility, and per-camera boxes.
-- [x] Emit synchronized C1/C2 `FramePacket` objects through the common interface.
-- [x] Share one YOLO detector while assigning independent ByteTrack state to C1
-  and C2.
+- [x] Download EPFL Laboratory C0/C1, identity positions, and calibration directly
+  from the authoritative publisher in code.
+- [x] Validate equal video length, 25 FPS rate, 360x288 resolution, and calibration.
+- [x] Parse the dense old-format file into 119 identity-labelled timestamps.
+- [x] Emit synchronized C0/C1 `FramePacket` objects while retaining raw source
+  frame IDs and timestamps.
+- [x] Share one YOLO detector while assigning independent ByteTrack state to C0
+  and C1.
+- [x] Write separate annotated videos and a synchronized side-by-side composite.
 
-Verified full-sequence replay:
+Verified dataset contract:
 
-- 400 synchronized timestamps / 800 camera frames processed in 73.01 seconds;
-- 5.48 synchronized pairs/s and 10.96 camera frames/s on the GTX 1650;
-- 9,518 person annotations containing 306 persistent IDs visible in C1 or C2;
-- C1: 8,223 detections, 2,962 track observations/crops, 188 local IDs;
-- C2: 7,378 detections, 3,814 track observations/crops, 224 local IDs;
-- a 20-timestamp annotated C1/C2 preview saved for visual inspection.
+- 2,955 synchronized frames and 119 labelled timestamps;
+- six persistent identities, 476 active position labels, maximum occupancy six;
+- C0/C1 plus metadata occupy 155,830,968 bytes.
 
-The high number of local IDs reflects fragmentation in a crowded sequence
-sampled at only 2 FPS. It is not presented as a tracking-accuracy result;
-quantitative tracker diagnosis and tuning remain in Stage 7.
+Verified two-person replay window, source frames 400-549:
 
-Exit: [x] both views replay through independent common pipelines.
+- 150 synchronized pairs / 300 camera frames in 9.42 seconds;
+- 15.93 synchronized pairs/s and 31.86 camera frames/s on the GTX 1650;
+- C0: 261 detections and 231 track observations/crops;
+- C1: 325 detections and 275 track observations/crops;
+- two ground-truth identities encountered;
+- synchronized annotated composite visually inspected.
+
+The former WILDTRACK C1/C2 data occupied 2.06 GiB and was deleted after EPFL
+passed validation and replay. Its code remains available as a non-default stress
+test and the dataset remains recoverable by its downloader.
+
+Exit: [x] both sparse views replay through independent common pipelines.
 
 ### Stage 6: Global Association — Not Started
 
@@ -555,7 +547,7 @@ Exit: [x] both views replay through independent common pipelines.
 - [ ] Maintain the global registry.
 - [ ] Tune the threshold on development data.
 
-Exit: [ ] matched people show the same global ID and color across C1 and C2.
+Exit: [ ] matched people show the same global ID and color across C0 and C1.
 
 ### Stage 7: Evaluation — Not Started
 
@@ -605,6 +597,8 @@ Multi_Cam_ReID/
 │   └── visualization/
 ├── scripts/
 │   ├── download_market1501.py
+│   ├── download_epfl_lab.py
+│   ├── run_epfl_lab.py
 │   ├── download_wildtrack.py
 │   ├── run_wildtrack.py
 │   └── run_live.py
@@ -621,7 +615,7 @@ If time becomes limited, submit:
 
 1. Market-1501 training notebook.
 2. Rank-1 and mAP evaluation.
-3. YOLO26n + ByteTrack on two WILDTRACK cameras.
+3. YOLO26n + ByteTrack on two synchronized EPFL Laboratory cameras.
 4. OSNet tracklet embeddings.
 5. Cosine distance + Hungarian global association.
 6. A recorded two-camera real or prerecorded demo.
@@ -632,10 +626,10 @@ Simulation and the third camera are the first items to remove if the schedule sl
 ## 19. Known Limitations
 
 - Similar clothing can confuse appearance Re-ID.
-- Market-1501 and WILDTRACK do not perfectly represent the team's cameras.
+- Market-1501 and the old low-resolution EPFL footage do not perfectly represent the team's cameras.
 - Occlusion and small crops reduce embedding quality.
 - Local ByteTrack errors propagate into global association.
-- WILDTRACK does not test non-overlapping travel-time reasoning.
+- EPFL Laboratory uses overlapping views and does not test non-overlapping travel-time reasoning.
 - The GTX 1650 may require lower resolution, less frequent embedding extraction, or sequential processing.
 - The system cannot prove a person's real identity.
 
@@ -646,19 +640,19 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - Avoid filming uninvolved people.
 - Retain recordings only as long as needed.
 - Document dataset citations and source URLs.
-- Do not redistribute Market-1501 or WILDTRACK with the repository.
+- Do not redistribute Market-1501, EPFL Laboratory, or WILDTRACK with the repository.
 
 ## 21. Acceptance Criteria
 
 - [x] Market-1501 downloads from code in a clean cloud notebook.
 - [x] OSNet-x0.25 training produces a reusable checkpoint.
 - [x] Rank-1, Rank-5, Rank-10, and mAP are reported.
-- [x] WILDTRACK downloads from code and annotations parse correctly.
+- [x] EPFL Laboratory downloads from code and identity positions parse correctly.
 - [x] Two cameras run independent YOLO + ByteTrack pipelines.
 - [x] Tracklets produce aggregated embeddings.
 - [ ] Cross-camera matching uses cosine distance and Hungarian assignment.
 - [ ] The same person receives the same displayed global ID across views.
-- [ ] WILDTRACK association results and runtime measurements are reported.
+- [ ] EPFL association results and runtime measurements are reported.
 - [ ] A two-camera real or prerecorded demonstration is recorded.
 - [x] Setup and reproduction instructions are present.
 
@@ -674,7 +668,7 @@ Optional:
 Market-1501
     -> fine-tune and evaluate OSNet-x0.25
 
-WILDTRACK C1 + C2
+EPFL Laboratory C0 + C1
     -> YOLO26n
     -> independent ByteTrack instances
     -> person crops
