@@ -15,6 +15,7 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 - [x] Safe checkpoint loading and normalized crop embeddings
 - [x] Standalone Re-ID evaluation and retrieval visualization
 - [x] YOLO + ByteTrack single-camera pipeline
+- [x] OSNet embeddings and rolling averages for actual ByteTrack tracklets
 - [ ] Cross-camera global association
 
 ## Environment
@@ -211,6 +212,10 @@ boundary consumed by OSNet in Stage 4. One tracker object belongs to exactly one
 camera; future cameras must get their own tracker while sharing the detector and
 Re-ID models.
 
+The box label starts with `person` because YOLO is deliberately called with only
+COCO class `0`. The remaining text is the camera-local ByteTrack ID and detector
+confidence, not a Re-ID or global identity.
+
 The verified 60-frame diagnostic run maintained one local ID for all 60 tracked
 frames, produced 60 valid crops, and processed 15.74 FPS on the GTX 1650. This is
 a wiring smoke test using a simple generated video, not a claim about tracking
@@ -269,6 +274,75 @@ keep its screen/app awake, allow Windows Firewall access on the private network,
 and test the `/video` URL in a browser if OpenCV cannot connect. Do not commit
 URLs containing usernames, passwords, or other credentials; the local YAML is
 Git-ignored.
+
+## Run Stage 4 Re-ID Integration
+
+Stage 4 takes the validated person crops produced by Stage 3 and runs the trained
+OSNet checkpoint on them. It samples each local track every few frames, keeps the
+latest normalized embeddings, averages them, and normalizes the average again.
+This rolling representation is less sensitive to one blurred or partially
+occluded crop than a single-frame embedding.
+
+Run the standalone integration diagnostic on a controlled clip containing at
+least two clearly different people with stable tracks:
+
+~~~powershell
+python scripts/run_reid_diagnostic.py `
+  --source path/to/two_people.mp4 `
+  --device cuda `
+  --embedding-interval 5 `
+  --display
+~~~
+
+The display still shows `person` and local IDs. Its extra Re-ID line reports the
+number of represented tracklets, stored samples, and embedding dimension; it
+does not claim that cross-camera identity matching has happened. The command
+writes these ignored artifacts under `outputs/stage4/reid_diagnostic/`:
+
+- `diagnostic.json`: runtime plus mean same-track and different-track cosine
+  similarities;
+- `tracklet_embeddings.npz`: pickle-free 512-D rolling representations and the
+  normalized samples used to build them.
+
+The diagnostic treats different local IDs in the controlled clip as different
+people, so do not use arbitrary footage with ByteTrack ID switches as ground
+truth. The verified two-person run processed 60 frames into two stable
+tracklets, sampled 24 embeddings, and measured **0.974 same-track cosine
+similarity versus 0.403 different-track similarity** (margin **0.571**) at
+24.16 FPS on the GTX 1650.
+
+The reusable Python composition is:
+
+~~~python
+from pathlib import Path
+
+from multicam_reid.pipeline import ReIDCameraPipeline, SingleCameraPipeline
+from multicam_reid.reid import ReIDEncoder, TrackletEmbeddingStore
+
+stage3 = SingleCameraPipeline(detector=detector, tracker=tracker)
+encoder = ReIDEncoder.from_checkpoint(
+    Path("outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60")
+)
+stage4 = ReIDCameraPipeline(
+    stage3=stage3,
+    tracklets=TrackletEmbeddingStore(encoder),
+)
+result = stage4.process(frame_packet)
+
+for appearance in result.appearances:
+    print(appearance.key, appearance.embedding.shape, appearance.stored_samples)
+~~~
+
+`appearance.key` is only `(camera_id, local_id)`. Stage 6 will compare these
+rolling vectors across cameras and assign global IDs; OSNet itself does not
+perform that decision.
+
+Run Stage 4's isolated unit tests without invoking the repository-wide coverage
+gate:
+
+~~~powershell
+python -m pytest tests/unit/test_tracklet_embeddings.py --no-cov
+~~~
 
 ## Cloud Training
 

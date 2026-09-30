@@ -499,18 +499,30 @@ Verified diagnostic run:
 This diagnostic uses a simple generated moving-person video to verify system
 wiring. Difficult real-footage tracking remains part of WILDTRACK and the live
 demo stages. The IP-webcam reconnect, isolation, and multi-camera orchestration
-are unit tested with simulated streams; actual phone URLs still require hardware
-validation during the real-camera demo stage.
+are unit tested with simulated streams. The user has also confirmed that one
+Android IP Webcam stream works live; simultaneous two-camera hardware validation
+remains part of the real-camera demo stage.
 
 Exit: [x] one video runs without tracker-state or crop errors.
 
-### Stage 4: Re-ID Integration — Foundation Ready
+### Stage 4: Re-ID Integration — Completed
 
 - [x] Load the trained OSNet checkpoint.
-- [ ] Extract embeddings from actual ByteTrack person crops.
-- [ ] Maintain tracklet averages.
+- [x] Extract normalized 512-D embeddings from actual ByteTrack person crops.
+- [x] Sample embeddings every five frames and maintain normalized rolling
+  averages over the latest ten samples per `(camera_id, local_id)`.
+- [x] Save pickle-free tracklet/sample embeddings and JSON diagnostic evidence.
 
-Exit: [ ] same-track embeddings are more similar than different-track embeddings in a small diagnostic.
+Verified two-person diagnostic:
+
+- 60 frames processed into exactly two stable local tracklets;
+- 24 OSNet embedding samples extracted from Stage 3 crops;
+- 0.974 mean same-track cosine similarity;
+- 0.403 mean different-track cosine similarity;
+- 0.571 positive separation margin;
+- 24.16 processing FPS on the GTX 1650.
+
+Exit: [x] same-track embeddings are more similar than different-track embeddings in a controlled diagnostic.
 
 ### Stage 5: WILDTRACK Two-Camera Pipeline — Not Started
 
@@ -628,7 +640,7 @@ Simulation and the third camera are the first items to remove if the schedule sl
 - [x] Rank-1, Rank-5, Rank-10, and mAP are reported.
 - [ ] WILDTRACK downloads from code and annotations parse correctly.
 - [ ] Two cameras run independent YOLO + ByteTrack pipelines.
-- [ ] Tracklets produce aggregated embeddings.
+- [x] Tracklets produce aggregated embeddings.
 - [ ] Cross-camera matching uses cosine distance and Hungarian assignment.
 - [ ] The same person receives the same displayed global ID across views.
 - [ ] WILDTRACK association results and runtime measurements are reported.

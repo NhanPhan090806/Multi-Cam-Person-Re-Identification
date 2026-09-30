@@ -37,6 +37,7 @@ multicam-verify-reid = "multicam_reid.reid.encoder:main"
 multicam-evaluate-reid = "multicam_reid.evaluation.market1501:main"
 multicam-run-single-camera = "multicam_reid.pipeline.video_runner:main"
 multicam-run-ip-webcams = "multicam_reid.pipeline.ip_webcams:main"
+multicam-run-reid-diagnostic = "multicam_reid.pipeline.reid_diagnostic:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
