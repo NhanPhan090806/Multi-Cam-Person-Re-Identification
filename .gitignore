@@ -18,6 +18,7 @@ env/
 .env
 .env.*
 !.env.example
+configs/ip_webcams.local.yaml
 
 # Jupyter and IDE files
 .ipynb_checkpoints/

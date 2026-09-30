@@ -1,0 +1,29 @@
+# Copy this file to configs/ip_webcams.local.yaml and edit the local copy.
+# Android "IP Webcam" commonly exposes MJPEG at http://PHONE_IP:8080/video.
+cameras:
+  - camera_id: C1
+    url: http://192.168.1.101:8080/video
+    enabled: true
+    window_width: 640
+    window_height: 360
+    window_x: 0
+    window_y: 0
+    reconnect_delay_seconds: 2.0
+
+  - camera_id: C2
+    url: http://192.168.1.102:8080/video
+    enabled: false
+    window_width: 640
+    window_height: 360
+    window_x: 660
+    window_y: 0
+    reconnect_delay_seconds: 2.0
+
+  - camera_id: C3
+    url: http://192.168.1.103:8080/video
+    enabled: false
+    window_width: 640
+    window_height: 360
+    window_x: 0
+    window_y: 400
+    reconnect_delay_seconds: 2.0

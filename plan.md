@@ -286,7 +286,7 @@ Planned adapters:
 
 - `WildtrackSource`
 - `VideoFileSource`
-- `RtspCameraSource`
+- `IpCameraWorker` for HTTP/HTTPS MJPEG and RTSP streams
 - `WebcamSource`
 - `SimulationSource` (optional)
 
@@ -485,6 +485,8 @@ Exit: [x] metrics and visual examples are reproducibly saved outside the trainin
 - [x] Camera-owned ByteTrack local IDs.
 - [x] Clipped and size-validated person crops.
 - [x] Annotated video visualization and JSON runtime summary.
+- [x] Configurable one-to-three IP-webcam workers with independent local
+  pipelines and per-window width, height, and position.
 
 Verified diagnostic run:
 
@@ -496,7 +498,9 @@ Verified diagnostic run:
 
 This diagnostic uses a simple generated moving-person video to verify system
 wiring. Difficult real-footage tracking remains part of WILDTRACK and the live
-demo stages.
+demo stages. The IP-webcam reconnect, isolation, and multi-camera orchestration
+are unit tested with simulated streams; actual phone URLs still require hardware
+validation during the real-camera demo stage.
 
 Exit: [x] one video runs without tracker-state or crop errors.
 

@@ -216,6 +216,60 @@ frames, produced 60 valid crops, and processed 15.74 FPS on the GTX 1650. This i
 a wiring smoke test using a simple generated video, not a claim about tracking
 accuracy on difficult real footage.
 
+## Connect One to Three IP Webcams
+
+The IP-webcam adapter runs the same Stage 3 pipeline independently for every
+enabled URL. It shares one YOLO model to conserve GPU memory, but every camera
+owns a separate ByteTrack state and therefore a separate local-ID namespace.
+There is still no cross-camera Re-ID at this point.
+
+Create your ignored local configuration from the safe example:
+
+~~~powershell
+Copy-Item configs/ip_webcams.example.yaml configs/ip_webcams.local.yaml
+~~~
+
+Edit `configs/ip_webcams.local.yaml`. For the Android app named **IP Webcam**,
+the stream URL is commonly:
+
+~~~text
+http://PHONE_IP:8080/video
+~~~
+
+Enable only the cameras currently available. If one entry is enabled, one
+worker and window are created. If two or three are enabled, all are connected
+and processed independently. Each entry has editable window geometry:
+
+~~~yaml
+- camera_id: C1
+  url: http://192.168.1.101:8080/video
+  enabled: true
+  window_width: 640
+  window_height: 360
+  window_x: 0
+  window_y: 0
+~~~
+
+Run the cameras after activating the venv:
+
+~~~powershell
+python scripts/run_ip_webcams.py `
+  --config configs/ip_webcams.local.yaml `
+  --device cuda
+~~~
+
+Press `q` or Escape to stop. Each stream has a background latest-frame reader,
+short network timeouts, and automatic reconnection, so a disconnected phone
+does not freeze the other cameras. YOLO inference runs sequentially on the
+shared GTX 1650; this avoids loading duplicate models but total FPS will fall as
+cameras are added.
+
+Phone and computer must normally be on the same LAN. Start the phone's server,
+keep its screen/app awake, allow Windows Firewall access on the private network,
+and test the `/video` URL in a browser if OpenCV cannot connect. Do not commit
+URLs containing usernames, passwords, or other credentials; the local YAML is
+Git-ignored.
+
 ## Cloud Training
 
 Use [train_market1501_kaggle.ipynb](train_market1501_kaggle.ipynb) on Kaggle, or [train_market1501.ipynb](train_market1501.ipynb) when the repository is already available locally. The notebooks:
