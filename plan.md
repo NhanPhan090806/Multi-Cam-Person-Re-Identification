@@ -479,14 +479,26 @@ provenance-validated cached evaluation took 6.15 seconds.
 
 Exit: [x] metrics and visual examples are reproducibly saved outside the training loop.
 
-### Stage 3: Single-Camera Pipeline — Not Started, Ready to Begin
+### Stage 3: Single-Camera Pipeline — Completed
 
-- [ ] YOLO26n detection.
-- [ ] ByteTrack local IDs.
-- [ ] Valid person crops.
-- [ ] Video visualization.
+- [x] YOLO26n person-only detection.
+- [x] Camera-owned ByteTrack local IDs.
+- [x] Clipped and size-validated person crops.
+- [x] Annotated video visualization and JSON runtime summary.
 
-Exit: [ ] one video runs without tracker-state or crop errors.
+Verified diagnostic run:
+
+- 60/60 frames processed without tracker-state, crop, video-read, or video-write errors;
+- 107 person detections;
+- 60 active-track observations with exactly one stable local ID;
+- 60 valid crops, with 10 saved for visual inspection;
+- 15.74 processing FPS on the GTX 1650 for a 12 FPS, 640x360 input.
+
+This diagnostic uses a simple generated moving-person video to verify system
+wiring. Difficult real-footage tracking remains part of WILDTRACK and the live
+demo stages.
+
+Exit: [x] one video runs without tracker-state or crop errors.
 
 ### Stage 4: Re-ID Integration — Foundation Ready
 

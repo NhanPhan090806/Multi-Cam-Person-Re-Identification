@@ -35,6 +35,7 @@ multicam-download-market1501 = "multicam_reid.data.market1501:main"
 multicam-train-reid = "multicam_reid.training.market1501:main"
 multicam-verify-reid = "multicam_reid.reid.encoder:main"
 multicam-evaluate-reid = "multicam_reid.evaluation.market1501:main"
+multicam-run-single-camera = "multicam_reid.pipeline.video_runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

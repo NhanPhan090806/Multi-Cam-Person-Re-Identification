@@ -14,7 +14,7 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 - [x] Full Market-1501 cloud training
 - [x] Safe checkpoint loading and normalized crop embeddings
 - [x] Standalone Re-ID evaluation and retrieval visualization
-- [ ] YOLO + ByteTrack camera pipeline
+- [x] YOLO + ByteTrack single-camera pipeline
 - [ ] Cross-camera global association
 
 ## Environment
@@ -36,6 +36,11 @@ Install this repository and its development tools:
 ~~~
 
 This repository lives under a Windows path containing Vietnamese characters. Use a normal install as shown above: current setuptools editable installs (`-e`) cannot encode that path into their `.pth` file. Reinstall after changing package source locally; pytest reads directly from `src/`.
+
+On Windows, installation also creates small `.exe` console launchers inside the
+venv's `Scripts` directory. They are wrappers that invoke this package with the
+venv's Python interpreter, not separately compiled applications. Every command
+can alternatively be run through its corresponding script in `scripts/`.
 
 ## Verify the Repository
 
@@ -168,6 +173,48 @@ print(metrics["mAP"], metrics["cmc"])
 This module is the Stage 2 quality gate. It proves that the saved checkpoint,
 serving-time crop preprocessing, embeddings, cosine ranking, and evaluation
 protocol work together before Stage 3 introduces YOLO and ByteTrack errors.
+
+## Run the Single-Camera Pipeline
+
+Stage 3 connects a person-only YOLO26n detector to one camera-owned ByteTrack
+instance, validates person crops, draws camera-local IDs, and writes an annotated
+video plus JSON runtime summary:
+
+~~~powershell
+& python scripts/run_single_camera.py `
+  --source path/to/input.mp4 `
+  --output outputs/stage3/annotated.mp4 `
+  --camera-id C1 `
+  --device cuda `
+  --crop-dir outputs/stage3/crops
+~~~
+
+Add `--display` for a live window and press Escape to stop. The YOLO confidence
+floor defaults to `0.10` so ByteTrack receives both its high- and low-confidence
+detection groups; ByteTrack starts new tracks at `0.25`.
+
+The same implementation is available as separate modules:
+
+~~~python
+from multicam_reid.detection import YoloPersonDetector
+from multicam_reid.pipeline import SingleCameraPipeline
+from multicam_reid.tracking import ByteTrackLocalTracker
+
+detector = YoloPersonDetector()
+tracker = ByteTrackLocalTracker(camera_id="C1")
+pipeline = SingleCameraPipeline(detector=detector, tracker=tracker)
+processed = pipeline.process(frame_packet)
+~~~
+
+`processed.tracks` contains local IDs and boxes. `processed.crops` is the clean
+boundary consumed by OSNet in Stage 4. One tracker object belongs to exactly one
+camera; future cameras must get their own tracker while sharing the detector and
+Re-ID models.
+
+The verified 60-frame diagnostic run maintained one local ID for all 60 tracked
+frames, produced 60 valid crops, and processed 15.74 FPS on the GTX 1650. This is
+a wiring smoke test using a simple generated video, not a claim about tracking
+accuracy on difficult real footage.
 
 ## Cloud Training
 
