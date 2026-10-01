@@ -11,6 +11,7 @@ from multicam_reid.association.global_registry import (
     cosine_distance_matrix,
     match_tracklets,
 )
+from multicam_reid.association.handoff import HandoffConfig, HandoffIdentityRegistry
 
 __all__ = [
     "AssociationConfig",
@@ -18,6 +19,8 @@ __all__ = [
     "DistanceMatrix",
     "GlobalIdentityRegistry",
     "GlobalIdentitySnapshot",
+    "HandoffConfig",
+    "HandoffIdentityRegistry",
     "IdentityMergeEvent",
     "TrackletMatch",
     "cosine_distance_matrix",

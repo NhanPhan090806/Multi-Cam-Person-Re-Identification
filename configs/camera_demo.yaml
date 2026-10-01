@@ -10,6 +10,9 @@
 active_mode: solo
 
 models:
+  # Separate places: recover departed people on later arrivals.
+  # Select overlap only for the old same-room/multiple-angle demo.
+  association_mode: handoff
   detector_model: yolo26n.pt
   checkpoint: outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60
   device: auto
@@ -20,6 +23,13 @@ models:
   max_cosine_distance: 0.35
   min_stored_samples: 2
   max_idle_updates: 250
+  gallery_ttl_seconds: 120.0
+  exit_grace_seconds: 1.0
+  min_travel_seconds: 0.0
+  match_margin: 0.05
+  # Empty: any route. Optional directed edges:
+  # [[PHONE, LAPTOP], [LAPTOP, PHONE]]
+  allowed_transitions: []
 
 runtime:
   output_dir: outputs/stage8/live_demo
@@ -29,6 +39,9 @@ runtime:
   minimum_active_cameras: 2
   max_runtime_seconds: null
   max_frames_per_camera: null
+  # Optional: recordings/handoff. Each run creates a NEW session directory.
+  # Stores processed raw JPEG frames with real timestamps; consumes disk space.
+  record_dir: null
 
 display:
   enabled: true
@@ -40,7 +53,8 @@ display:
   control_bar_height: 54
 
 modes:
-  # One participant operates one Android IP Webcam and the laptop's own webcam.
+  # Place the phone in a DIFFERENT area from the laptop; walk between them.
+  # Keep both streams running even when one view contains no person.
   solo:
     cameras:
       - kind: ip

@@ -17,7 +17,9 @@ import numpy as np
 import yaml
 
 from multicam_reid.association import AssociationConfig, GlobalIdentityRegistry
+from multicam_reid.association.handoff import HandoffConfig, HandoffIdentityRegistry
 from multicam_reid.detection.yolo import YoloConfig, YoloPersonDetector
+from multicam_reid.inputs.handoff_recordings import SessionRecorder
 from multicam_reid.inputs.ip_camera import IpCameraConfig, IpCameraWorker
 from multicam_reid.inputs.webcam import WebcamConfig, WebcamWorker
 from multicam_reid.pipeline.reid_camera import ReIDCameraPipeline, ReIDProcessedFrame
@@ -66,8 +68,16 @@ class DemoModelConfig:
     max_cosine_distance: float = 0.35
     min_stored_samples: int = 2
     max_idle_updates: int = 250
+    association_mode: str = "handoff"
+    gallery_ttl_seconds: float = 120.0
+    exit_grace_seconds: float = 1.0
+    min_travel_seconds: float = 0.0
+    match_margin: float = 0.05
+    allowed_transitions: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        if self.association_mode not in {"handoff", "overlap"}:
+            raise ValueError("association_mode must be handoff or overlap")
         if self.device not in {"auto", "cpu", "cuda"}:
             raise ValueError("device must be one of: auto, cpu, cuda")
         if not 0.0 <= self.confidence <= 1.0:
@@ -84,6 +94,15 @@ class DemoModelConfig:
             min_stored_samples=self.min_stored_samples,
             max_idle_frames=self.max_idle_updates,
         )
+        HandoffConfig(
+            max_cosine_distance=self.max_cosine_distance,
+            min_stored_samples=self.min_stored_samples,
+            gallery_ttl_seconds=self.gallery_ttl_seconds,
+            exit_grace_seconds=self.exit_grace_seconds,
+            min_travel_seconds=self.min_travel_seconds,
+            match_margin=self.match_margin,
+            allowed_transitions=self.allowed_transitions,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +116,7 @@ class DemoRuntimeConfig:
     minimum_active_cameras: int = 2
     max_runtime_seconds: float | None = None
     max_frames_per_camera: int | None = None
+    record_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.startup_timeout_seconds <= 0:
@@ -154,17 +174,18 @@ class CameraDemoConfig:
         camera_ids = [camera.camera_id for camera in self.cameras]
         if len(set(camera_ids)) != len(camera_ids):
             raise ValueError("camera_id values must be unique")
+        if any(
+            source not in camera_ids or target not in camera_ids
+            for source, target in self.models.allowed_transitions
+        ):
+            raise ValueError("allowed_transitions must reference configured camera IDs")
         if self.runtime.minimum_active_cameras > len(self.cameras):
             raise ValueError("minimum_active_cameras exceeds configured cameras")
         ip_count = sum(isinstance(camera, IpCameraConfig) for camera in self.cameras)
         webcam_count = sum(isinstance(camera, WebcamConfig) for camera in self.cameras)
-        if self.mode == "solo" and (
-            len(self.cameras) != 2 or ip_count != 1 or webcam_count != 1
-        ):
+        if self.mode == "solo" and (len(self.cameras) != 2 or ip_count != 1 or webcam_count != 1):
             raise ValueError("solo mode requires exactly one IP camera and one local webcam")
-        if self.mode == "multi_ip" and (
-            len(self.cameras) < 2 or ip_count != len(self.cameras)
-        ):
+        if self.mode == "multi_ip" and (len(self.cameras) < 2 or ip_count != len(self.cameras)):
             raise ValueError("multi_ip mode requires at least two IP cameras")
 
     @property
@@ -187,7 +208,11 @@ class CameraDemoConfig:
                 "detector_model": str(self.models.detector_model),
                 "checkpoint": str(self.models.checkpoint),
             },
-            "runtime": {**asdict(self.runtime), "output_dir": str(self.runtime.output_dir)},
+            "runtime": {
+                **asdict(self.runtime),
+                "output_dir": str(self.runtime.output_dir),
+                "record_dir": str(self.runtime.record_dir) if self.runtime.record_dir else None,
+            },
             "display": asdict(self.display),
         }
 
@@ -208,6 +233,9 @@ class CameraDemoSummary:
     screenshots: tuple[str, ...]
     final_status: dict[str, dict[str, object]]
     output_dir: str
+    association_mode: str = "handoff"
+    handoff_events: int = 0
+    recording_dir: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -224,7 +252,7 @@ class IdentityDisplay:
     @property
     def text(self) -> str:
         global_text = str(self.global_id) if self.global_id is not None else "pending"
-        return f"Global {global_text} | Local {self.local_id} | conf {self.confidence:.2f}"
+        return f"Global {global_text} | Local {self.local_id} | det {self.confidence:.2f}"
 
     @property
     def color(self) -> tuple[int, int, int]:
@@ -340,9 +368,15 @@ def load_camera_demo_config(path: Path, *, mode: str | None = None) -> CameraDem
         model_values["detector_model"] = Path(model_values["detector_model"])
     if "checkpoint" in model_values:
         model_values["checkpoint"] = Path(model_values["checkpoint"])
+    if "allowed_transitions" in model_values:
+        model_values["allowed_transitions"] = tuple(
+            tuple(edge) for edge in model_values["allowed_transitions"]
+        )
     runtime_values = _mapping(root.get("runtime"), name="runtime")
     if "output_dir" in runtime_values:
         runtime_values["output_dir"] = Path(runtime_values["output_dir"])
+    if runtime_values.get("record_dir") is not None:
+        runtime_values["record_dir"] = Path(runtime_values["record_dir"])
     display_values = _mapping(root.get("display"), name="display")
     try:
         return CameraDemoConfig(
@@ -414,15 +448,33 @@ def build_live_pipelines(
     tracklet_config: TrackletEmbeddingConfig | None = None,
 ) -> dict[str, ReIDCameraPipeline]:
     """Share heavy models while isolating tracker and tracklet state per camera."""
+    return build_reid_pipelines(
+        [camera.camera_id for camera in cameras],
+        detector,
+        encoder,
+        tracker_factory=tracker_factory,
+        tracklet_config=tracklet_config,
+    )
+
+
+def build_reid_pipelines(
+    camera_ids: Sequence[str],
+    detector: Any,
+    encoder: Any,
+    *,
+    tracker_factory: Callable[[str], Any] = ByteTrackLocalTracker,
+    tracklet_config: TrackletEmbeddingConfig | None = None,
+) -> dict[str, ReIDCameraPipeline]:
+    """Common independent-camera pipeline builder for live and recorded sources."""
     return {
-        camera.camera_id: ReIDCameraPipeline(
+        camera_id: ReIDCameraPipeline(
             stage3=SingleCameraPipeline(
                 detector=detector,
-                tracker=tracker_factory(camera.camera_id),
+                tracker=tracker_factory(camera_id),
             ),
             tracklets=TrackletEmbeddingStore(encoder, tracklet_config),
         )
-        for camera in cameras
+        for camera_id in camera_ids
     }
 
 
@@ -445,6 +497,7 @@ def render_dashboard(
     *,
     controller: ScreenshotController,
     notification: str | None = None,
+    session_message: str = "Quit: Q or Esc",
 ) -> np.ndarray:
     """Render unobstructed camera pixels above separate black information panels."""
     ids = tuple(camera_ids)
@@ -561,7 +614,7 @@ def render_dashboard(
         2,
         cv2.LINE_AA,
     )
-    message = notification or "Quit: Q or Esc"
+    message = notification or session_message
     message_color = (90, 240, 120) if notification else (220, 220, 220)
     cv2.putText(
         bar,
@@ -593,12 +646,35 @@ def _final_status(workers: Mapping[str, LiveWorker]) -> dict[str, dict[str, obje
     return {camera_id: asdict(worker.status()) for camera_id, worker in workers.items()}
 
 
+def build_association_registry(models: DemoModelConfig):
+    """Choose the identity policy independently of camera source mode."""
+    if models.association_mode == "overlap":
+        return GlobalIdentityRegistry(
+            AssociationConfig(
+                max_cosine_distance=models.max_cosine_distance,
+                min_stored_samples=models.min_stored_samples,
+                max_idle_frames=models.max_idle_updates,
+            )
+        )
+    return HandoffIdentityRegistry(
+        HandoffConfig(
+            max_cosine_distance=models.max_cosine_distance,
+            min_stored_samples=models.min_stored_samples,
+            gallery_ttl_seconds=models.gallery_ttl_seconds,
+            exit_grace_seconds=models.exit_grace_seconds,
+            min_travel_seconds=models.min_travel_seconds,
+            match_margin=models.match_margin,
+            allowed_transitions=models.allowed_transitions,
+        )
+    )
+
+
 def run_camera_demo(
     config: CameraDemoConfig,
     *,
     pipelines: Mapping[str, LivePipeline],
     workers: Mapping[str, LiveWorker] | None = None,
-    registry: GlobalIdentityRegistry | None = None,
+    registry: GlobalIdentityRegistry | HandoffIdentityRegistry | None = None,
     screenshot_controller: ScreenshotController | None = None,
 ) -> CameraDemoSummary:
     """Run live detection through global association for either Stage 8 source mode."""
@@ -608,19 +684,17 @@ def run_camera_demo(
     active_workers = workers or build_live_workers(config.cameras)
     if set(active_workers) != set(camera_ids):
         raise ValueError("workers must contain exactly one entry per camera")
-    association = registry or GlobalIdentityRegistry(
-        AssociationConfig(
-            max_cosine_distance=config.models.max_cosine_distance,
-            min_stored_samples=config.models.min_stored_samples,
-            max_idle_frames=config.models.max_idle_updates,
-        )
-    )
+    association = registry if registry is not None else build_association_registry(config.models)
     controller = screenshot_controller or ScreenshotController()
     output_dir = config.runtime.output_dir.expanduser().resolve()
     screenshot_dir = output_dir / "screenshots"
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "settings.json").write_text(
+        json.dumps(config.public_dict(), indent=2), encoding="utf-8"
+    )
     assignments_path = output_dir / "assignments.jsonl"
     events_path = output_dir / "merge_events.jsonl"
+    handoff_path = output_dir / "handoff_events.jsonl"
     counts = {camera_id: 0 for camera_id in camera_ids}
     last_frame_ids = {camera_id: -1 for camera_id in camera_ids}
     latest_results: dict[str, ReIDProcessedFrame] = {}
@@ -631,18 +705,27 @@ def run_camera_demo(
     notice = TransientNotice()
     association_updates = 0
     merge_count = 0
+    handoff_count = 0
     started = time.monotonic()
+    recorder = (
+        SessionRecorder(config.runtime.record_dir, camera_ids)
+        if config.runtime.record_dir is not None
+        else None
+    )
 
-    if config.display.enabled:
-        cv2.namedWindow(config.display.window_name, cv2.WINDOW_NORMAL)
-        cv2.setMouseCallback(config.display.window_name, controller.handle_mouse)
-    for worker in active_workers.values():
-        worker.start()
-
+    window_opened = False
     try:
-        with assignments_path.open("w", encoding="utf-8") as assignments_file, events_path.open(
-            "w", encoding="utf-8"
-        ) as events_file:
+        if config.display.enabled:
+            cv2.namedWindow(config.display.window_name, cv2.WINDOW_NORMAL)
+            window_opened = True
+            cv2.setMouseCallback(config.display.window_name, controller.handle_mouse)
+        for worker in active_workers.values():
+            worker.start()
+        with (
+            assignments_path.open("w", encoding="utf-8") as assignments_file,
+            events_path.open("w", encoding="utf-8") as events_file,
+            handoff_path.open("w", encoding="utf-8") as handoff_file,
+        ):
             while True:
                 received = False
                 for camera_id in camera_ids:
@@ -652,6 +735,8 @@ def run_camera_demo(
                     packet = active_workers[camera_id].snapshot(last_frame_ids[camera_id])
                     if packet is None:
                         continue
+                    if recorder is not None:
+                        recorder.write(packet, elapsed=time.monotonic() - started)
                     result = pipelines[camera_id].process(packet)
                     now = time.monotonic()
                     last_frame_ids[camera_id] = packet.frame_id
@@ -675,11 +760,34 @@ def run_camera_demo(
                         if camera_id in current_results
                         for appearance in current_results[camera_id].appearances
                     )
-                    association_result = association.update(
-                        appearances,
-                        frame_id=association_updates,
-                        timestamp=elapsed,
-                    )
+                    if isinstance(association, HandoffIdentityRegistry):
+                        visible_keys = tuple(
+                            TrackKey(camera_id, track.local_id)
+                            for camera_id, result in current_results.items()
+                            for track in result.stage3.tracks
+                        )
+                        association_result = association.update(
+                            appearances,
+                            frame_id=association_updates,
+                            timestamp=elapsed,
+                            visible_keys=visible_keys,
+                        )
+                        for event in association_result.handoff_events:
+                            handoff_file.write(json.dumps(event.to_dict()) + "\n")
+                            handoff_file.flush()
+                            handoff_count += 1
+                            notice.show(
+                                f"Global {event.global_id}: {event.from_camera} -> "
+                                f"{event.to_camera} | gap {event.gap_seconds:.1f}s",
+                                now=time.monotonic(),
+                                duration_seconds=4.0,
+                            )
+                    else:
+                        association_result = association.update(
+                            appearances,
+                            frame_id=association_updates,
+                            timestamp=elapsed,
+                        )
                     for event in association_result.merge_events:
                         events_file.write(json.dumps(event.to_dict()) + "\n")
                         merge_count += 1
@@ -694,7 +802,7 @@ def run_camera_demo(
                                         appearance.key.camera_id
                                     ].stage3.packet.frame_id,
                                     "local_id": appearance.key.local_id,
-                                    "global_id": association_result.assignments[appearance.key],
+                                    "global_id": association_result.assignments.get(appearance.key),
                                     "stored_samples": appearance.stored_samples,
                                     "total_samples": appearance.total_samples,
                                 }
@@ -718,6 +826,9 @@ def run_camera_demo(
                             )
                             for track in result.stage3.tracks
                         )
+                    for camera_id in set(latest_results) - set(current_results):
+                        rendered_frames[camera_id] = latest_results[camera_id].stage3.packet.frame
+                        identity_rows[camera_id] = ()
                     association_updates += 1
 
                 dashboard: np.ndarray | None = None
@@ -734,6 +845,10 @@ def run_camera_demo(
                         config.display,
                         controller=controller,
                         notification=notice.message(time.monotonic()),
+                        session_message=(
+                            f"{config.models.association_mode} | "
+                            f"gallery {len(association)} | handoffs {handoff_count}"
+                        ),
                     )
                 should_quit = False
                 if config.display.enabled and dashboard is not None:
@@ -768,9 +883,7 @@ def run_camera_demo(
                             camera_ids,
                             rendered_frames,
                             {
-                                camera_id: _status_text(
-                                    active_workers[camera_id].status()
-                                )
+                                camera_id: _status_text(active_workers[camera_id].status())
                                 for camera_id in camera_ids
                             },
                             identity_rows,
@@ -799,8 +912,7 @@ def run_camera_demo(
                     break
                 if config.runtime.max_frames_per_camera is not None:
                     completed = sum(
-                        count >= config.runtime.max_frames_per_camera
-                        for count in counts.values()
+                        count >= config.runtime.max_frames_per_camera for count in counts.values()
                     )
                     if completed >= config.runtime.minimum_active_cameras:
                         break
@@ -809,9 +921,11 @@ def run_camera_demo(
     except KeyboardInterrupt:
         pass
     finally:
+        if recorder is not None:
+            recorder.close()
         for worker in active_workers.values():
             worker.stop()
-        if config.display.enabled:
+        if window_opened:
             cv2.destroyWindow(config.display.window_name)
 
     elapsed = time.monotonic() - started
@@ -828,6 +942,11 @@ def run_camera_demo(
         screenshots=tuple(screenshots),
         final_status=_final_status(active_workers),
         output_dir=str(output_dir),
+        association_mode=(
+            "handoff" if isinstance(association, HandoffIdentityRegistry) else "overlap"
+        ),
+        handoff_events=handoff_count,
+        recording_dir=str(recorder.directory) if recorder else None,
     )
     (output_dir / "summary.json").write_text(
         json.dumps(summary.to_dict(), indent=2), encoding="utf-8"
@@ -838,9 +957,7 @@ def run_camera_demo(
 def build_parser() -> argparse.ArgumentParser:
     """Build the surface-level Stage 8 command interface."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Run live multi-camera person Re-ID in solo phone+laptop or multi-IP mode."
-        )
+        description=("Run live multi-camera person Re-ID in solo phone+laptop or multi-IP mode.")
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--mode", choices=sorted(SUPPORTED_MODES))
@@ -855,6 +972,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--detector-model", type=Path)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--association-mode", choices=("handoff", "overlap"))
+    parser.add_argument("--gallery-ttl-seconds", type=float)
+    parser.add_argument(
+        "--record-dir",
+        type=Path,
+        help="Record raw timestamped frames into a new session for replay.",
+    )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--max-runtime-seconds", type=float)
     parser.add_argument("--max-frames-per-camera", type=int)
@@ -879,6 +1003,8 @@ def _apply_cli_overrides(config: CameraDemoConfig, args: argparse.Namespace) -> 
             "device": args.device,
             "detector_model": args.detector_model,
             "checkpoint": args.checkpoint,
+            "association_mode": args.association_mode,
+            "gallery_ttl_seconds": args.gallery_ttl_seconds,
         }.items()
         if value is not None
     }
@@ -888,6 +1014,7 @@ def _apply_cli_overrides(config: CameraDemoConfig, args: argparse.Namespace) -> 
             "output_dir": args.output_dir,
             "max_runtime_seconds": args.max_runtime_seconds,
             "max_frames_per_camera": args.max_frames_per_camera,
+            "record_dir": args.record_dir,
         }.items()
         if value is not None
     }

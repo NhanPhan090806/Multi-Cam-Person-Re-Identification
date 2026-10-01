@@ -354,8 +354,112 @@ def test_run_camera_demo_associates_sources_logs_evidence_and_screenshot(
     assert len(summary.screenshots) == 1
     assert Path(summary.screenshots[0]).is_file()
     assert all(worker.started and worker.stopped for worker in workers.values())
+
     assert json.loads((tmp_path / "stage8" / "summary.json").read_text())["mode"] == "solo"
     assert len((tmp_path / "stage8" / "assignments.jsonl").read_text().splitlines()) == 2
+
+
+def test_live_default_handoff_policy_waits_then_recovers_id_and_records_raw_session(
+    tmp_path: Path,
+) -> None:
+    cameras = (IpCameraConfig("PHONE", "http://phone/video"), WebcamConfig("LAPTOP", 0))
+    config = CameraDemoConfig(
+        mode="solo",
+        cameras=cameras,
+        models=DemoModelConfig(exit_grace_seconds=0.0),
+        runtime=DemoRuntimeConfig(
+            output_dir=tmp_path / "live",
+            record_dir=tmp_path / "recordings",
+            max_frames_per_camera=5,
+            poll_interval_seconds=0.0,
+            association_window_seconds=10.0,
+        ),
+        display=DemoDisplayConfig(enabled=False),
+    )
+
+    class ScheduleWorker(FakeWorker):
+        def __init__(self, camera: str, markers: list[int]):
+            super().__init__(camera, FramePacket(camera, 0, 0.0, np.zeros((48, 64, 3), np.uint8)))
+            self.markers = markers
+            self.index = 0
+
+        def snapshot(self, after_frame_id=-1):
+            if self.index >= len(self.markers):
+                return None
+            image = np.full((48, 64, 3), self.markers[self.index], np.uint8)
+            packet = FramePacket(self.camera_id, self.index, self.index / 10.0, image)
+            self.index += 1
+            return packet
+
+    class SchedulePipeline(FixedPipeline):
+        def process(self, packet):
+            marker = int(packet.frame[0, 0, 0])
+            if not marker:
+                return ReIDProcessedFrame(
+                    ProcessedFrame(
+                        packet,
+                        DetectionBatch.empty(),
+                        (),
+                        (),
+                        packet.frame.copy(),
+                    ),
+                    (),
+                )
+            result = super().process(packet)
+            item = result.appearances[0]
+            from dataclasses import replace
+
+            return ReIDProcessedFrame(
+                result.stage3,
+                (
+                    replace(
+                        item,
+                        stored_samples=marker,
+                        total_samples=marker,
+                    ),
+                ),
+            )
+
+    workers = {
+        "PHONE": ScheduleWorker("PHONE", [2, 2, 0, 0, 0]),
+        "LAPTOP": ScheduleWorker("LAPTOP", [0, 0, 0, 1, 2]),
+    }
+    summary = run_camera_demo(
+        config,
+        pipelines={camera.camera_id: SchedulePipeline(camera.camera_id) for camera in cameras},
+        workers=workers,
+    )
+    assert summary.association_mode == "handoff"
+    assert summary.global_ids_issued == 1
+    assert summary.handoff_events == 1
+    event = json.loads((tmp_path / "live" / "handoff_events.jsonl").read_text())
+    assert event["from_camera"] == "PHONE" and event["to_camera"] == "LAPTOP"
+    assert summary.recording_dir is not None
+    assert len((Path(summary.recording_dir) / "frames.jsonl").read_text().splitlines()) == 10
+
+
+def test_default_live_policy_keeps_simultaneous_lookalikes_separate(tmp_path: Path) -> None:
+    cameras = (IpCameraConfig("PHONE", "http://phone/video"), WebcamConfig("LAPTOP", 0))
+    config = CameraDemoConfig(
+        mode="solo",
+        cameras=cameras,
+        runtime=DemoRuntimeConfig(output_dir=tmp_path, max_frames_per_camera=1),
+        display=DemoDisplayConfig(enabled=False),
+    )
+    frame = np.zeros((48, 64, 3), np.uint8)
+    summary = run_camera_demo(
+        config,
+        pipelines={camera.camera_id: FixedPipeline(camera.camera_id) for camera in cameras},
+        workers={
+            camera.camera_id: FakeWorker(
+                camera.camera_id,
+                FramePacket(camera.camera_id, 0, 0.0, frame),
+            )
+            for camera in cameras
+        },
+    )
+    assert summary.global_ids_issued == 2
+    assert summary.handoff_events == 0
 
 
 def test_live_builders_share_models_but_isolate_camera_state() -> None:

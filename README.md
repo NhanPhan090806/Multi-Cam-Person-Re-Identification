@@ -1,6 +1,7 @@
 # Multi-Camera Person Re-Identification
 
-Course project for assigning consistent global person IDs across overlapping camera views.
+Course project for recovering a person's global ID after they leave one camera,
+travel through an unseen area, and enter a camera at a different location.
 
 The frozen scope and design decisions are in [plan.md](plan.md).
 
@@ -18,6 +19,66 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 - [x] OSNet embeddings and rolling averages for actual ByteTrack tracklets
 - [x] Sparse synchronized EPFL Laboratory C0/C1 replay with independent local trackers
 - [x] Cross-camera global association with auditable global-ID logs and video
+
+## Separate-Location Camera Handoff
+
+The original EPFL stages tested overlapping views. Their results remain available
+as historical diagnostics and do not establish handoff accuracy. The live app now
+defaults to `models.association_mode: handoff`. `solo`/`multi_ip` select devices;
+`handoff`/`overlap` select the identity policy independently.
+
+Keep Market-1501 and the trained OSNet checkpoint. Put the phone and laptop in
+different areas with a blind region between them. Keep both streams running,
+including empty views. Stand in A for a few seconds, leave both views, then enter B.
+The registry remembers departed people for 120 seconds by default and attempts
+to recover their original global ID. It does not merge simultaneous look-alikes.
+
+`Global pending` means insufficient samples, ambiguous appearance, or a plausible
+match awaiting the departure/time gate. It is reconsidered on later observations.
+A successful recovery produces a black-area message such as
+`Global 1: PHONE -> LAPTOP | gap 5.0s` plus a `handoff_events.jsonl` entry.
+
+Record a short consented session:
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+  --mode solo `
+  --camera-url PHONE=http://192.168.1.23:8080/video `
+  --record-dir recordings/handoff
+~~~
+
+Each recording creates a new session folder with raw JPEG frames, an ordered
+timeline and a manifest. Its path appears as `recording_dir` in the session
+summary. These are processed observations, not every hardware frame. Recording
+consumes disk space and can lower throughput; use short sessions.
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_handoff_replay.py `
+  --recording recordings/handoff/session_YOUR_SESSION `
+  --output-dir outputs/handoff/my_replay `
+  --show
+~~~
+
+Replay reuses the same detector, independent trackers, OSNet and handoff registry.
+It uses recorded timestamps even when inference runs at a different speed.
+The optional display runs at processing speed. Outputs include assignments,
+handoff events/screenshots, settings and runtime counts. Accuracy requires human
+labels; predicted IDs are not ground truth.
+
+Configure `gallery_ttl_seconds`, `exit_grace_seconds`, `min_travel_seconds`,
+`match_margin`, and optional directed `allowed_transitions` in the camera config.
+The 0.75-second observation freshness window does not limit the travel gap.
+No ground-plane calibration or synchronized views are needed.
+
+Model-backed wiring smoke (requires the existing Stage 3 smoke input):
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' scripts/smoke_handoff.py
+~~~
+
+It schedules repeated smoke images as A -> blank -> B. This tests actual models
+through the new path, but is artificial footage, not an accuracy benchmark.
+See [migration notes](docs/handoff_migration.md) and [updated plan](plan.md).
 
 ## Environment
 
@@ -534,7 +595,7 @@ at 0.35; the reporting sequence was not used for repeated threshold tuning.
 ## Run Stage 8 Live Camera Demo
 
 Stage 8 replaces synchronized dataset files with independently threaded live
-sources while reusing the same YOLO, ByteTrack, OSNet, and global association
+sources while reusing YOLO, ByteTrack and OSNet with the handoff association
 modules. The repository-surface command supports two source arrangements:
 
 - `solo`: exactly one phone IP Webcam plus one laptop webcam, suitable for one
@@ -575,20 +636,20 @@ If Windows exposes the laptop camera under another index, try
 
 The dashboard keeps camera pixels clear except for colored bounding boxes. Each
 camera has a separate black information panel underneath it showing connection
-health and explicit `Global N | Local N | confidence` rows in the same color as
+health and explicit `Global N | Local N | det 0.xx` rows in the same color as
 the corresponding box. Click **Save screenshot [S]** or press `S` to save the
 complete annotated dashboard. A green success message appears for one second
 only after the clean screenshot has been written, so the confirmation itself is
 not captured. Press `Q` or Escape to stop. Screenshots, non-sensitive session
-settings, assignments, merge events, and runtime counts are written under
+settings, assignments, handoff/merge events, and runtime counts are written under
 `outputs/stage8/live_demo/`. Stream URLs are deliberately excluded.
 
 Edit `configs/camera_demo.yaml` to change model paths, capture dimensions,
 dashboard tile size, active-camera tolerance, or the two camera lists. The live
 loop consumes only each worker's newest frame, so a slow network stream cannot
-build an unbounded queue. It associates the most recent camera observations
-within a 0.75-second window; this is practical demonstration synchronization,
-not hardware timestamp synchronization.
+build an unbounded queue. A 0.75-second window limits cached observation freshness.
+It does not limit time spent travelling between cameras: the identity gallery
+retention controls that. `det` is detection confidence, not a Re-ID probability.
 
 ## Cloud Training
 
