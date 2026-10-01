@@ -23,10 +23,14 @@ from multicam_reid.inputs.webcam import WebcamConfig, WebcamWorker
 from multicam_reid.pipeline.reid_camera import ReIDCameraPipeline, ReIDProcessedFrame
 from multicam_reid.pipeline.single_camera import SingleCameraPipeline
 from multicam_reid.reid.encoder import DEFAULT_CHECKPOINT, ReIDEncoder, ReIDEncoderConfig
-from multicam_reid.reid.tracklets import TrackletEmbeddingConfig, TrackletEmbeddingStore
+from multicam_reid.reid.tracklets import (
+    TrackKey,
+    TrackletEmbeddingConfig,
+    TrackletEmbeddingStore,
+)
 from multicam_reid.tracking.bytetrack import ByteTrackLocalTracker
 from multicam_reid.types import FramePacket
-from multicam_reid.visualization.tracks import draw_global_tracks
+from multicam_reid.visualization.tracks import draw_global_boxes, global_id_color
 
 DEFAULT_CONFIG_PATH = Path("configs/camera_demo.yaml")
 DEFAULT_OUTPUT_DIR = Path("outputs/stage8/live_demo")
@@ -117,6 +121,7 @@ class DemoDisplayConfig:
     window_name: str = "Multi-Camera Person Re-Identification"
     tile_width: int = 640
     tile_height: int = 360
+    info_panel_height: int = 136
     columns: int = 2
     control_bar_height: int = 54
 
@@ -125,6 +130,8 @@ class DemoDisplayConfig:
             raise ValueError("window_name must not be empty")
         if self.tile_width <= 0 or self.tile_height <= 0:
             raise ValueError("tile dimensions must be positive")
+        if self.info_panel_height < 80:
+            raise ValueError("info_panel_height must be at least 80")
         if self.columns <= 0:
             raise ValueError("columns must be positive")
         if self.control_bar_height < 40:
@@ -206,6 +213,26 @@ class CameraDemoSummary:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class IdentityDisplay:
+    """One visible track's explicit identity row in a camera's black panel."""
+
+    global_id: int | None
+    local_id: int
+    confidence: float
+
+    @property
+    def text(self) -> str:
+        global_text = str(self.global_id) if self.global_id is not None else "pending"
+        return f"Global {global_text} | Local {self.local_id} | conf {self.confidence:.2f}"
+
+    @property
+    def color(self) -> tuple[int, int, int]:
+        if self.global_id is None:
+            return 160, 160, 160
+        return global_id_color(self.global_id)
+
+
 class ScreenshotController:
     """Turn mouse clicks or the ``S`` key into one-shot screenshot requests."""
 
@@ -241,6 +268,25 @@ class ScreenshotController:
         x1, y1, x2, y2 = self.button_bounds
         if x1 <= x <= x2 and y1 <= y <= y2:
             self.request()
+
+
+class TransientNotice:
+    """Hold a dashboard message for a bounded monotonic-time interval."""
+
+    def __init__(self) -> None:
+        self._text: str | None = None
+        self._expires_at = 0.0
+
+    def show(self, text: str, *, now: float, duration_seconds: float = 1.0) -> None:
+        if duration_seconds <= 0:
+            raise ValueError("duration_seconds must be positive")
+        self._text = text
+        self._expires_at = now + duration_seconds
+
+    def message(self, now: float) -> str | None:
+        if self._text is None or now >= self._expires_at:
+            return None
+        return self._text
 
 
 def _mapping(raw: object, *, name: str) -> dict[str, Any]:
@@ -386,46 +432,40 @@ def _status_text(status: Any) -> str:
     return f"disconnected | {status.last_error or 'waiting for frames'}"
 
 
-def _placeholder(width: int, height: int, camera_id: str) -> np.ndarray:
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-    cv2.putText(
-        frame,
-        f"Waiting for {camera_id}...",
-        (20, height // 2),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (220, 220, 220),
-        2,
-        cv2.LINE_AA,
-    )
-    return frame
+def _placeholder(width: int, height: int) -> np.ndarray:
+    return np.zeros((height, width, 3), dtype=np.uint8)
 
 
 def render_dashboard(
     camera_ids: Sequence[str],
     frames: Mapping[str, np.ndarray],
     statuses: Mapping[str, str],
+    identities: Mapping[str, Sequence[IdentityDisplay]],
     config: DemoDisplayConfig,
     *,
     controller: ScreenshotController,
+    notification: str | None = None,
 ) -> np.ndarray:
-    """Render all annotated streams and a real clickable screenshot control."""
+    """Render unobstructed camera pixels above separate black information panels."""
     ids = tuple(camera_ids)
     rows = math.ceil(len(ids) / config.columns)
     tiles: list[np.ndarray] = []
     for camera_id in ids:
         source = frames.get(camera_id)
         if source is None:
-            tile = _placeholder(config.tile_width, config.tile_height, camera_id)
+            video = _placeholder(config.tile_width, config.tile_height)
         else:
-            tile = cv2.resize(
+            video = cv2.resize(
                 source,
                 (config.tile_width, config.tile_height),
                 interpolation=cv2.INTER_AREA,
             )
-        cv2.rectangle(tile, (0, 0), (config.tile_width - 1, 52), (0, 0, 0), -1)
+        panel = np.zeros(
+            (config.info_panel_height, config.tile_width, 3),
+            dtype=np.uint8,
+        )
         cv2.putText(
-            tile,
+            panel,
             camera_id,
             (10, 22),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -435,7 +475,7 @@ def render_dashboard(
             cv2.LINE_AA,
         )
         cv2.putText(
-            tile,
+            panel,
             statuses.get(camera_id, "waiting"),
             (10, 44),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -444,9 +484,44 @@ def render_dashboard(
             1,
             cv2.LINE_AA,
         )
-        tiles.append(tile)
+        rows_for_camera = tuple(identities.get(camera_id, ()))
+        max_rows = max(1, (config.info_panel_height - 64) // 22)
+        if not rows_for_camera:
+            cv2.putText(
+                panel,
+                "No active person tracks",
+                (10, 72),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (160, 160, 160),
+                1,
+                cv2.LINE_AA,
+            )
+        for row_index, identity in enumerate(rows_for_camera[:max_rows]):
+            text_y = 72 + row_index * 22
+            cv2.rectangle(
+                panel,
+                (10, text_y - 12),
+                (24, text_y + 2),
+                identity.color,
+                -1,
+            )
+            cv2.putText(
+                panel,
+                identity.text,
+                (32, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                identity.color,
+                1,
+                cv2.LINE_AA,
+            )
+        tiles.append(np.vstack((video, panel)))
 
-    blank = np.zeros((config.tile_height, config.tile_width, 3), dtype=np.uint8)
+    blank = np.zeros(
+        (config.tile_height + config.info_panel_height, config.tile_width, 3),
+        dtype=np.uint8,
+    )
     while len(tiles) < rows * config.columns:
         tiles.append(blank.copy())
     grid_rows = [
@@ -486,14 +561,16 @@ def render_dashboard(
         2,
         cv2.LINE_AA,
     )
+    message = notification or "Quit: Q or Esc"
+    message_color = (90, 240, 120) if notification else (220, 220, 220)
     cv2.putText(
         bar,
-        "Quit: Q or Esc",
+        message,
         (button_bounds[2] + 24, button_bounds[3] - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
-        (220, 220, 220),
-        1,
+        message_color,
+        2 if notification else 1,
         cv2.LINE_AA,
     )
     return np.vstack((grid, bar))
@@ -549,7 +626,9 @@ def run_camera_demo(
     latest_results: dict[str, ReIDProcessedFrame] = {}
     latest_received: dict[str, float] = {}
     rendered_frames: dict[str, np.ndarray] = {}
+    identity_rows: dict[str, tuple[IdentityDisplay, ...]] = {}
     screenshots: list[str] = []
+    notice = TransientNotice()
     association_updates = 0
     merge_count = 0
     started = time.monotonic()
@@ -623,11 +702,21 @@ def run_camera_demo(
                             + "\n"
                         )
                     for camera_id, result in current_results.items():
-                        rendered_frames[camera_id] = draw_global_tracks(
+                        rendered_frames[camera_id] = draw_global_boxes(
                             result.stage3.packet.frame,
                             result.stage3.tracks,
                             association_result.assignments,
                             camera_id,
+                        )
+                        identity_rows[camera_id] = tuple(
+                            IdentityDisplay(
+                                global_id=association_result.assignments.get(
+                                    TrackKey(camera_id, track.local_id)
+                                ),
+                                local_id=track.local_id,
+                                confidence=track.confidence,
+                            )
+                            for track in result.stage3.tracks
                         )
                     association_updates += 1
 
@@ -641,8 +730,10 @@ def run_camera_demo(
                         camera_ids,
                         rendered_frames,
                         statuses,
+                        identity_rows,
                         config.display,
                         controller=controller,
+                        notification=notice.message(time.monotonic()),
                     )
                 should_quit = False
                 if config.display.enabled and dashboard is not None:
@@ -653,8 +744,41 @@ def run_camera_demo(
                     elif key == ord("s"):
                         controller.request()
                 if controller.consume_request() and dashboard is not None:
-                    screenshot = save_dashboard_screenshot(dashboard, screenshot_dir)
+                    clean_dashboard = render_dashboard(
+                        camera_ids,
+                        rendered_frames,
+                        {
+                            camera_id: _status_text(active_workers[camera_id].status())
+                            for camera_id in camera_ids
+                        },
+                        identity_rows,
+                        config.display,
+                        controller=controller,
+                        notification=None,
+                    )
+                    screenshot = save_dashboard_screenshot(clean_dashboard, screenshot_dir)
                     screenshots.append(str(screenshot))
+                    notice.show(
+                        f"Screenshot saved: {screenshot.name}",
+                        now=time.monotonic(),
+                        duration_seconds=1.0,
+                    )
+                    if config.display.enabled:
+                        confirmation = render_dashboard(
+                            camera_ids,
+                            rendered_frames,
+                            {
+                                camera_id: _status_text(
+                                    active_workers[camera_id].status()
+                                )
+                                for camera_id in camera_ids
+                            },
+                            identity_rows,
+                            config.display,
+                            controller=controller,
+                            notification=notice.message(time.monotonic()),
+                        )
+                        cv2.imshow(config.display.window_name, confirmation)
 
                 elapsed = time.monotonic() - started
                 active_camera_count = sum(count > 0 for count in counts.values())

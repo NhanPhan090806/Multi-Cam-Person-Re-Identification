@@ -17,7 +17,9 @@ from multicam_reid.pipeline.camera_demo import (
     DemoDisplayConfig,
     DemoModelConfig,
     DemoRuntimeConfig,
+    IdentityDisplay,
     ScreenshotController,
+    TransientNotice,
     apply_source_overrides,
     build_live_pipelines,
     build_live_workers,
@@ -241,14 +243,24 @@ def test_dashboard_has_clickable_screenshot_button_and_saves_unicode_path(
 ) -> None:
     controller = ScreenshotController()
     frames = {
-        "PHONE": np.full((80, 120, 3), 30, dtype=np.uint8),
-        "LAPTOP": np.full((80, 120, 3), 90, dtype=np.uint8),
+        "PHONE": np.full((90, 160, 3), 30, dtype=np.uint8),
+        "LAPTOP": np.full((90, 160, 3), 90, dtype=np.uint8),
     }
     dashboard = render_dashboard(
         ("PHONE", "LAPTOP"),
         frames,
         {"PHONE": "connected", "LAPTOP": "connected"},
-        DemoDisplayConfig(enabled=True, tile_width=160, tile_height=90, columns=2),
+        {
+            "PHONE": (IdentityDisplay(global_id=7, local_id=3, confidence=0.91),),
+            "LAPTOP": (IdentityDisplay(global_id=7, local_id=8, confidence=0.88),),
+        },
+        DemoDisplayConfig(
+            enabled=True,
+            tile_width=160,
+            tile_height=90,
+            info_panel_height=90,
+            columns=2,
+        ),
         controller=controller,
     )
     x1, y1, x2, y2 = controller.button_bounds
@@ -260,6 +272,39 @@ def test_dashboard_has_clickable_screenshot_button_and_saves_unicode_path(
     assert screenshot.is_file()
     decoded = cv2.imdecode(np.frombuffer(screenshot.read_bytes(), np.uint8), cv2.IMREAD_COLOR)
     assert decoded is not None
+    np.testing.assert_array_equal(dashboard[:90, :160], frames["PHONE"])
+    assert np.any(dashboard[90:180, :160] != 0)
+
+
+def test_transient_screenshot_notice_lasts_one_second_and_clean_frame_is_saved(
+    tmp_path: Path,
+) -> None:
+    controller = ScreenshotController()
+    display = DemoDisplayConfig(
+        tile_width=160,
+        tile_height=90,
+        info_panel_height=90,
+    )
+    frame = np.full((90, 160, 3), 55, dtype=np.uint8)
+    clean_dashboard = render_dashboard(
+        ("PHONE",),
+        {"PHONE": frame},
+        {"PHONE": "connected"},
+        {"PHONE": (IdentityDisplay(global_id=2, local_id=4, confidence=0.9),)},
+        display,
+        controller=controller,
+        notification=None,
+    )
+    expected_ok, expected_jpeg = cv2.imencode(".jpg", clean_dashboard)
+    assert expected_ok
+
+    screenshot = save_dashboard_screenshot(clean_dashboard, tmp_path)
+    notice = TransientNotice()
+    notice.show(f"Screenshot saved: {screenshot.name}", now=10.0, duration_seconds=1.0)
+
+    assert screenshot.read_bytes() == expected_jpeg.tobytes()
+    assert notice.message(10.999) == f"Screenshot saved: {screenshot.name}"
+    assert notice.message(11.001) is None
 
 
 def test_run_camera_demo_associates_sources_logs_evidence_and_screenshot(

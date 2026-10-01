@@ -22,13 +22,36 @@ def _track_color(local_id: int) -> tuple[int, int, int]:
     )
 
 
-def _global_color(global_id: int) -> tuple[int, int, int]:
+def global_id_color(global_id: int) -> tuple[int, int, int]:
     """Return the same high-contrast BGR color for an ID in every camera."""
     return (
         48 + (global_id * 67) % 208,
         48 + (global_id * 109) % 208,
         48 + (global_id * 163) % 208,
     )
+
+
+def draw_global_boxes(
+    frame: np.ndarray,
+    tracks: Sequence[LocalTrack],
+    assignments: Mapping[TrackKey, int],
+    camera_id: str,
+) -> np.ndarray:
+    """Draw global-ID-colored boxes without placing any text over camera pixels."""
+    from multicam_reid.reid.tracklets import TrackKey
+
+    annotated = frame.copy()
+    height, width = annotated.shape[:2]
+    for track in tracks:
+        key = TrackKey(camera_id, track.local_id)
+        global_id = assignments.get(key)
+        color = global_id_color(global_id) if global_id is not None else (160, 160, 160)
+        x1 = int(np.clip(np.floor(track.xyxy[0]), 0, width - 1))
+        y1 = int(np.clip(np.floor(track.xyxy[1]), 0, height - 1))
+        x2 = int(np.clip(np.ceil(track.xyxy[2]), 0, width - 1))
+        y2 = int(np.clip(np.ceil(track.xyxy[3]), 0, height - 1))
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+    return annotated
 
 
 def draw_local_tracks(
@@ -106,7 +129,7 @@ def draw_global_tracks(
     for row_index, track in enumerate(tracks):
         key = TrackKey(camera_id, track.local_id)
         global_id = assignments.get(key)
-        color = _global_color(global_id) if global_id is not None else (160, 160, 160)
+        color = global_id_color(global_id) if global_id is not None else (160, 160, 160)
         x1 = int(np.clip(np.floor(track.xyxy[0]), 0, width - 1))
         y1 = int(np.clip(np.floor(track.xyxy[1]), 0, height - 1))
         x2 = int(np.clip(np.ceil(track.xyxy[2]), 0, width - 1))

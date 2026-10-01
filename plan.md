@@ -616,8 +616,10 @@ Exit: [x] results are reproducible and exported for the report.
   the Stage 6 global identity registry.
 - [x] Associate recent asynchronous observations inside a configurable
   0.75-second live window.
-- [x] Display local/global IDs in one configurable dashboard.
-- [x] Add a clickable **Save screenshot [S]** control and keyboard shortcut.
+- [x] Display local/global IDs in dedicated black per-camera panels, leaving
+  camera pixels clear except for colored bounding boxes.
+- [x] Add a clickable **Save screenshot [S]** control, keyboard shortcut, and a
+  one-second post-save confirmation that is excluded from the screenshot.
 - [x] Add `main_camera_demo.py`, argument overrides, dry-run validation, and a
   two-mode `configs/camera_demo.yaml`.
 - [x] Save assignments, merge events, screenshots, non-sensitive camera health,

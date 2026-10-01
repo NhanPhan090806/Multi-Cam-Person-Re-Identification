@@ -573,11 +573,15 @@ If Windows exposes the laptop camera under another index, try
   --camera-url PHONE_B=http://192.168.1.24:8080/video
 ~~~
 
-The dashboard displays local and global IDs using the same global-ID color in
-every view. Click **Save screenshot [S]** or press `S` to save the complete
-annotated dashboard; press `Q` or Escape to stop. Screenshots, non-sensitive
-session settings, assignments, merge events, and runtime counts are written
-under `outputs/stage8/live_demo/`. Stream URLs are deliberately excluded.
+The dashboard keeps camera pixels clear except for colored bounding boxes. Each
+camera has a separate black information panel underneath it showing connection
+health and explicit `Global N | Local N | confidence` rows in the same color as
+the corresponding box. Click **Save screenshot [S]** or press `S` to save the
+complete annotated dashboard. A green success message appears for one second
+only after the clean screenshot has been written, so the confirmation itself is
+not captured. Press `Q` or Escape to stop. Screenshots, non-sensitive session
+settings, assignments, merge events, and runtime counts are written under
+`outputs/stage8/live_demo/`. Stream URLs are deliberately excluded.
 
 Edit `configs/camera_demo.yaml` to change model paths, capture dimensions,
 dashboard tile size, active-camera tolerance, or the two camera lists. The live

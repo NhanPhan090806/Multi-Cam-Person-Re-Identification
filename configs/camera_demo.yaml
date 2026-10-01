@@ -35,6 +35,7 @@ display:
   window_name: Multi-Camera Person Re-Identification
   tile_width: 640
   tile_height: 360
+  info_panel_height: 136
   columns: 2
   control_bar_height: 54
 
