@@ -318,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-size", type=int, default=640)
     parser.add_argument("--start-frame", type=int, default=0)
     parser.add_argument("--frame-stride", type=int, default=1)
-    parser.add_argument("--max-frames", type=int)
+    parser.add_argument("--max-frames", type=int, default=700)
     parser.add_argument("--display", action="store_true")
     parser.add_argument("--no-video", action="store_true")
     parser.add_argument("--no-composite", action="store_true")
