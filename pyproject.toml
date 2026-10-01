@@ -43,6 +43,7 @@ multicam-run-reid-diagnostic = "multicam_reid.pipeline.reid_diagnostic:main"
 multicam-download-epfl-lab = "multicam_reid.data.epfl_lab:main"
 multicam-run-epfl-lab = "multicam_reid.pipeline.epfl_lab_runner:main"
 multicam-run-global-epfl = "multicam_reid.pipeline.global_epfl_runner:main"
+multicam-camera-demo = "multicam_reid.pipeline.camera_demo:main"
 multicam-download-wildtrack = "multicam_reid.data.wildtrack:main"
 multicam-run-wildtrack = "multicam_reid.pipeline.wildtrack_runner:main"
 

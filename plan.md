@@ -407,7 +407,7 @@ Measure latency, FPS, GPU memory, CPU use, dropped frames, and two-camera throug
 
 ## 16. Development Stages
 
-Progress last updated: **2026-09-30**.
+Progress last updated: **2026-10-01**.
 
 - `[x]` completed and verified
 - `[~]` in progress
@@ -606,12 +606,29 @@ Reproducible artifacts are saved under `outputs/stage7/epfl_lab_full/` as
 
 Exit: [x] results are reproducible and exported for the report.
 
-### Stage 8: Real Two-Camera Demo — Not Started
+### Stage 8: Real Two-Camera Demo — Implemented, Hardware Validation Pending
 
-- [ ] Connect two webcams, phones, files, or RTSP streams.
-- [ ] Use overlapping views.
-- [ ] Display local and global IDs.
-- [ ] Test entry, exit, partial occlusion, and simultaneous visibility.
+- [x] Add `solo` mode for one phone IP Webcam plus one laptop webcam.
+- [x] Add `multi_ip` mode for two or more IP Webcam/MJPEG/RTSP streams.
+- [x] Use independent latest-frame workers so one slow camera cannot block the
+  other cameras or build an unbounded queue.
+- [x] Reuse camera-owned ByteTrack/tracklet state, shared YOLO/OSNet models, and
+  the Stage 6 global identity registry.
+- [x] Associate recent asynchronous observations inside a configurable
+  0.75-second live window.
+- [x] Display local/global IDs in one configurable dashboard.
+- [x] Add a clickable **Save screenshot [S]** control and keyboard shortcut.
+- [x] Add `main_camera_demo.py`, argument overrides, dry-run validation, and a
+  two-mode `configs/camera_demo.yaml`.
+- [x] Save assignments, merge events, screenshots, non-sensitive camera health,
+  and a runtime summary without logging stream URLs.
+- [ ] Validate the phone plus laptop webcam on the user's actual network.
+- [ ] Test simultaneous visibility, camera-to-camera movement, exit/re-entry,
+  and partial occlusion.
+- [ ] Record the final demonstration.
+
+The application and simulated integration tests are complete. Hardware behavior
+cannot be claimed until the real phone and laptop webcam run succeeds.
 
 Exit: [ ] a stable demonstration is recorded.
 

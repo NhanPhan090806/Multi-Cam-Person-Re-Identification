@@ -531,6 +531,61 @@ visibility flags, so these are calibrated project metrics—not official
 MOTChallenge MOTA or IDF1 scores. The Stage 6 cosine threshold remained frozen
 at 0.35; the reporting sequence was not used for repeated threshold tuning.
 
+## Run Stage 8 Live Camera Demo
+
+Stage 8 replaces synchronized dataset files with independently threaded live
+sources while reusing the same YOLO, ByteTrack, OSNet, and global association
+modules. The repository-surface command supports two source arrangements:
+
+- `solo`: exactly one phone IP Webcam plus one laptop webcam, suitable for one
+  participant operating both cameras;
+- `multi_ip`: two or more phone/IP-camera streams, suitable for a group demo.
+
+First start the IP Webcam server on the phone and place every device on the same
+local network. Android IP Webcam commonly displays an address such as
+`http://192.168.1.23:8080`; its OpenCV MJPEG endpoint is normally `/video`.
+
+Validate configuration without opening models or cameras:
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+  --mode solo `
+  --camera-url PHONE=http://192.168.1.23:8080/video `
+  --dry-run
+~~~
+
+Run the one-person phone plus laptop demonstration:
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+  --mode solo `
+  --camera-url PHONE=http://192.168.1.23:8080/video `
+  --webcam-index 0
+~~~
+
+If Windows exposes the laptop camera under another index, try
+`--webcam-index 1`. For a multi-IP session:
+
+~~~powershell
+& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+  --mode multi_ip `
+  --camera-url PHONE_A=http://192.168.1.23:8080/video `
+  --camera-url PHONE_B=http://192.168.1.24:8080/video
+~~~
+
+The dashboard displays local and global IDs using the same global-ID color in
+every view. Click **Save screenshot [S]** or press `S` to save the complete
+annotated dashboard; press `Q` or Escape to stop. Screenshots, non-sensitive
+session settings, assignments, merge events, and runtime counts are written
+under `outputs/stage8/live_demo/`. Stream URLs are deliberately excluded.
+
+Edit `configs/camera_demo.yaml` to change model paths, capture dimensions,
+dashboard tile size, active-camera tolerance, or the two camera lists. The live
+loop consumes only each worker's newest frame, so a slow network stream cannot
+build an unbounded queue. It associates the most recent camera observations
+within a 0.75-second window; this is practical demonstration synchronization,
+not hardware timestamp synchronization.
+
 ## Cloud Training
 
 Use [train_market1501_kaggle.ipynb](train_market1501_kaggle.ipynb) on Kaggle, or [train_market1501.ipynb](train_market1501.ipynb) when the repository is already available locally. The notebooks:

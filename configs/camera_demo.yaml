@@ -1,0 +1,78 @@
+# Stage 8 live demonstration configuration.
+#
+# Quick solo run (phone + laptop webcam):
+#   python main_camera_demo.py --mode solo `
+#     --camera-url PHONE=http://YOUR_PHONE_IP:8080/video
+#
+# Android "IP Webcam" usually exposes MJPEG at http://PHONE_IP:8080/video.
+# Stream URLs are never written to the session summary. Keep passwords out of Git.
+
+active_mode: solo
+
+models:
+  detector_model: yolo26n.pt
+  checkpoint: outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60
+  device: auto
+  confidence: 0.1
+  image_size: 640
+  history_size: 10
+  embedding_interval: 5
+  max_cosine_distance: 0.35
+  min_stored_samples: 2
+  max_idle_updates: 250
+
+runtime:
+  output_dir: outputs/stage8/live_demo
+  startup_timeout_seconds: 20.0
+  poll_interval_seconds: 0.005
+  association_window_seconds: 0.75
+  minimum_active_cameras: 2
+  max_runtime_seconds: null
+  max_frames_per_camera: null
+
+display:
+  enabled: true
+  window_name: Multi-Camera Person Re-Identification
+  tile_width: 640
+  tile_height: 360
+  columns: 2
+  control_bar_height: 54
+
+modes:
+  # One participant operates one Android IP Webcam and the laptop's own webcam.
+  solo:
+    cameras:
+      - kind: ip
+        camera_id: PHONE
+        url: http://192.168.1.100:8080/video
+        reconnect_delay_seconds: 2.0
+        open_timeout_ms: 5000
+        read_timeout_ms: 2000
+
+      - kind: webcam
+        camera_id: LAPTOP
+        device_index: 0
+        capture_width: 640
+        capture_height: 360
+        capture_fps: null
+        backend: auto
+        reconnect_delay_seconds: 2.0
+
+  # Enable and edit at least two IP Webcam entries for a multi-person session.
+  multi_ip:
+    cameras:
+      - kind: ip
+        camera_id: PHONE_A
+        url: http://192.168.1.101:8080/video
+        reconnect_delay_seconds: 2.0
+
+      - kind: ip
+        camera_id: PHONE_B
+        url: http://192.168.1.102:8080/video
+        reconnect_delay_seconds: 2.0
+
+      - kind: ip
+        camera_id: PHONE_C
+        url: http://192.168.1.103:8080/video
+        enabled: false
+        reconnect_delay_seconds: 2.0

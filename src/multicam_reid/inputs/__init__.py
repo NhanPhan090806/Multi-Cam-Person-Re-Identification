@@ -3,6 +3,7 @@
 from multicam_reid.inputs.epfl_lab import EpflLabSource, EpflLabSynchronizedFrame
 from multicam_reid.inputs.ip_camera import IpCameraConfig, IpCameraWorker
 from multicam_reid.inputs.video import VideoFileSource
+from multicam_reid.inputs.webcam import WebcamConfig, WebcamWorker
 from multicam_reid.inputs.wildtrack import WildtrackSource, WildtrackSynchronizedFrame
 
 __all__ = [
@@ -11,6 +12,8 @@ __all__ = [
     "IpCameraConfig",
     "IpCameraWorker",
     "VideoFileSource",
+    "WebcamConfig",
+    "WebcamWorker",
     "WildtrackSource",
     "WildtrackSynchronizedFrame",
 ]
