@@ -158,6 +158,55 @@ modes:
     )
 
 
+def test_live_cli_overlap_opts_into_hybrid_and_can_clear_pairs(tmp_path, capsys):
+    path = tmp_path / "camera_demo.yaml"
+    _write_demo_config(path)
+    assert main(["--config", str(path), "--overlap", "PHONE,LAPTOP", "--dry-run"]) == 0
+    settings = json.loads(capsys.readouterr().out)
+    assert settings["models"]["association_mode"] == "hybrid"
+    assert settings["models"]["overlap_pairs"] == [["LAPTOP", "PHONE"]]
+    assert main(["--config", str(path), "--no-overlap", "--dry-run"]) == 0
+    assert json.loads(capsys.readouterr().out)["models"]["association_mode"] == "handoff"
+    assert (
+        main(["--config", str(path), "--overlap", "PHONE,LAPTOP", "--no-reconcile", "--dry-run"])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["models"]["reconciliation_enabled"] is False
+
+
+def test_live_cli_rejects_unknown_pair_and_conflicting_policy(tmp_path):
+    path = tmp_path / "camera_demo.yaml"
+    _write_demo_config(path)
+    with pytest.raises(ValueError, match="selected camera"):
+        main(["--config", str(path), "--overlap", "PHONE,TYPO", "--dry-run"])
+    with pytest.raises(ValueError, match="requires --association-mode hybrid"):
+        main(
+            [
+                "--config",
+                str(path),
+                "--association-mode",
+                "handoff",
+                "--overlap",
+                "PHONE,LAPTOP",
+                "--dry-run",
+            ]
+        )
+
+
+def test_yaml_hybrid_pairs_are_loaded_and_validated(tmp_path):
+    path = tmp_path / "camera_demo.yaml"
+    _write_demo_config(path)
+    path.write_text(
+        path.read_text().replace(
+            "models:", "models:\n  association_mode: hybrid\n  overlap_pairs: [[PHONE, LAPTOP]]"
+        )
+    )
+    config = load_camera_demo_config(path)
+    assert config.models.overlap_pairs == (("PHONE", "LAPTOP"),)
+    with pytest.raises(ValueError, match="selected camera"):
+        load_camera_demo_config(path, mode="multi_ip")
+
+
 def test_webcam_worker_publishes_latest_frame_and_stops() -> None:
     frame = np.full((24, 32, 3), 90, dtype=np.uint8)
     captures: list[FakeCapture] = []
@@ -357,6 +406,43 @@ def test_run_camera_demo_associates_sources_logs_evidence_and_screenshot(
 
     assert json.loads((tmp_path / "stage8" / "summary.json").read_text())["mode"] == "solo"
     assert len((tmp_path / "stage8" / "assignments.jsonl").read_text().splitlines()) == 2
+
+
+def test_live_hybrid_logs_overlap_without_counting_a_handoff(tmp_path):
+    cameras = (IpCameraConfig("PHONE", "http://phone/video"), WebcamConfig("LAPTOP", 0))
+    config = CameraDemoConfig(
+        mode="solo",
+        cameras=cameras,
+        models=DemoModelConfig(
+            association_mode="hybrid",
+            overlap_pairs=(("PHONE", "LAPTOP"),),
+            overlap_confirmations=1,
+        ),
+        runtime=DemoRuntimeConfig(
+            output_dir=tmp_path / "live",
+            max_frames_per_camera=1,
+            poll_interval_seconds=0,
+            association_window_seconds=10,
+        ),
+        display=DemoDisplayConfig(enabled=False),
+    )
+    workers = {
+        camera.camera_id: FakeWorker(
+            camera.camera_id,
+            FramePacket(camera.camera_id, 0, 0, np.zeros((48, 64, 3), np.uint8)),
+        )
+        for camera in cameras
+    }
+    result = run_camera_demo(
+        config,
+        pipelines={c.camera_id: FixedPipeline(c.camera_id) for c in cameras},
+        workers=workers,
+    )
+    assert result.association_mode == "hybrid"
+    assert result.global_ids_issued == 1
+    assert result.overlap_events == 1 and result.handoff_events == 0
+    event = json.loads((tmp_path / "live/overlap_events.jsonl").read_text())
+    assert event["event"] == "overlap"
 
 
 def test_live_default_handoff_policy_waits_then_recovers_id_and_records_raw_session(

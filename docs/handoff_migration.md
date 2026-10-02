@@ -1,5 +1,8 @@
 # Correction to separate-location camera handoffs
 
+This document records the original handoff migration. For current commands and
+arguments, see [run.md](../run.md); current progress is in [plan.md](../plan.md).
+
 The old scope selected overlapping cameras. The intended mission is A -> leave ->
 unseen travel -> B, with the original anonymous global ID recovered in B.
 
@@ -47,9 +50,10 @@ Keep Market-1501 and the checkpoint. Keep EPFL as an optional overlap regression
 dataset (approximately 149 MiB). WILDTRACK's former download was already removed;
 its optional downloader remains. This migration deletes no data or checkpoints.
 
-The primary full-scene handoff data is consented phone/laptop recordings from
-separate areas. Record entrances, exits and background frames across a blind gap.
-This matches the target setting without a large download.
+The migration initially proposed consented phone/laptop recordings from separate
+areas. The project now also uses WiseNET Set 2 as its public full-scene development
+test. Hardware recordings remain the live demonstration input: record entrances,
+exits and background frames across a blind gap.
 
 [PRID2011 publisher](https://www.tugraz.at/institute/icg/research/team-bischof/learning-recognition-surveillance/downloads/prid11/)
 provides single/multi-shot person crops, including 200 shared identities, but its

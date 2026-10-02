@@ -12,6 +12,7 @@ active_mode: solo
 models:
   # Separate places: recover departed people on later arrivals.
   # Select overlap only for the old same-room/multiple-angle demo.
+  # For a mixed network, use hybrid plus explicit overlap_pairs below.
   association_mode: handoff
   detector_model: yolo26n.pt
   checkpoint: outputs/train/osnet_x0_25_market1501_results/model/model.pth.tar-60
@@ -30,6 +31,17 @@ models:
   # Empty: any route. Optional directed edges:
   # [[PHONE, LAPTOP], [LAPTOP, PHONE]]
   allowed_transitions: []
+  # Undirected simultaneous-visibility pairs; never inferred transitively.
+  # For solo hybrid: set association_mode: hybrid and [[PHONE, LAPTOP]].
+  # The CLI --overlap PHONE,LAPTOP sets both fields without editing this file.
+  overlap_pairs: []
+  overlap_max_cosine_distance: 0.25
+  # Three fresh appearance comparisons; cached frames do not count again.
+  overlap_confirmations: 3
+  # Hybrid only: reconsider separate IDs using mutual-best fresh evidence.
+  reconciliation_enabled: true
+  reconciliation_confirmations: 5
+  reconciliation_min_seconds: 1.0
 
 runtime:
   output_dir: outputs/stage8/live_demo

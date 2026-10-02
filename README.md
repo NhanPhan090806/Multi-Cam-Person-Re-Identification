@@ -25,7 +25,7 @@ The frozen scope and design decisions are in [plan.md](plan.md).
 The original EPFL stages tested overlapping views. Their results remain available
 as historical diagnostics and do not establish handoff accuracy. The live app now
 defaults to `models.association_mode: handoff`. `solo`/`multi_ip` select devices;
-`handoff`/`overlap` select the identity policy independently.
+`handoff`/`hybrid`/`overlap` select the identity policy independently.
 
 Keep Market-1501 and the trained OSNet checkpoint. Put the phone and laptop in
 different areas with a blind region between them. Keep both streams running,
@@ -41,7 +41,7 @@ A successful recovery produces a black-area message such as
 Record a short consented session:
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+python main_camera_demo.py `
   --mode solo `
   --camera-url PHONE=http://192.168.1.23:8080/video `
   --record-dir recordings/handoff
@@ -53,7 +53,7 @@ summary. These are processed observations, not every hardware frame. Recording
 consumes disk space and can lower throughput; use short sessions.
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_handoff_replay.py `
+python main_handoff_replay.py `
   --recording recordings/handoff/session_YOUR_SESSION `
   --output-dir outputs/handoff/my_replay `
   --show
@@ -73,7 +73,7 @@ No ground-plane calibration or synchronized views are needed.
 Model-backed wiring smoke (requires the existing Stage 3 smoke input):
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' scripts/smoke_handoff.py
+python scripts/smoke_handoff.py
 ~~~
 
 It schedules repeated smoke images as A -> blank -> B. This tests actual models
@@ -81,6 +81,10 @@ through the new path, but is artificial footage, not an accuracy benchmark.
 See [migration notes](docs/handoff_migration.md) and [updated plan](plan.md).
 
 ## Environment
+
+For a command-focused guide with arguments and examples, see [run.md](run.md).
+All commands assume you run from the repository root with your Python environment
+activated; `python` refers to that environment's interpreter.
 
 The verified local environment is Python 3.12. The package supports Python 3.10-3.12 so it can run on current Kaggle and Colab images.
 
@@ -95,7 +99,7 @@ PyTorch should be installed separately using the build appropriate for the targe
 Install this repository and its development tools:
 
 ~~~powershell
-& python -m pip install ".[dev]"
+python -m pip install ".[dev]"
 ~~~
 
 This repository lives under a Windows path containing Vietnamese characters. Use a normal install as shown above: current setuptools editable installs (`-e`) cannot encode that path into their `.pth` file. Reinstall after changing package source locally; pytest reads directly from `src/`.
@@ -108,8 +112,8 @@ can alternatively be run through its corresponding script in `scripts/`.
 ## Verify the Repository
 
 ~~~powershell
-& python -m pytest
-& python -m ruff check .
+python -m pytest
+python -m ruff check .
 ~~~
 
 ## Download Market-1501
@@ -117,7 +121,7 @@ can alternatively be run through its corresponding script in `scripts/`.
 The downloader uses the public Kaggle mirror **pengcw1/market-1501**, extracts it into the Torchreid-compatible layout, and prints integrity statistics.
 
 ~~~powershell
-& python scripts/download_market1501.py --output-dir data/reid/market1501
+python scripts/download_market1501.py --output-dir data/reid/market1501
 ~~~
 
 Expected layout:
@@ -136,19 +140,19 @@ data/reid/
 Validate configuration and dataset paths without starting training:
 
 ~~~powershell
-& python scripts/train_market1501.py --dry-run
+python scripts/train_market1501.py --dry-run
 ~~~
 
 Run the one-epoch smoke configuration:
 
 ~~~powershell
-& python scripts/train_market1501.py --smoke
+python scripts/train_market1501.py --smoke
 ~~~
 
 Run the full configuration:
 
 ~~~powershell
-& python scripts/train_market1501.py
+python scripts/train_market1501.py
 ~~~
 
 The default settings are in [configs/train_market1501.yaml](configs/train_market1501.yaml). Training outputs and model checkpoints are ignored by Git.
@@ -158,13 +162,13 @@ The default settings are in [configs/train_market1501.yaml](configs/train_market
 The epoch-60 checkpoint is the selected model: 64.6% mAP, 84.0% Rank-1, 94.1% Rank-5, and 96.6% Rank-10. Verify that it loads and produces a unit-normalized embedding:
 
 ~~~powershell
-& python scripts/verify_reid_checkpoint.py
+python scripts/verify_reid_checkpoint.py
 ~~~
 
 To encode a real OpenCV-compatible person crop instead of the synthetic smoke-test crop:
 
 ~~~powershell
-& python scripts/verify_reid_checkpoint.py --image path/to/person_crop.jpg
+python scripts/verify_reid_checkpoint.py --image path/to/person_crop.jpg
 ~~~
 
 The application API accepts OpenCV BGR crops and returns 512-dimensional unit vectors:
@@ -186,7 +190,7 @@ Run the selected checkpoint through the project's application preprocessing and
 embedding API, then independently calculate the official Market-1501 metrics:
 
 ~~~powershell
-& python scripts/evaluate_market1501.py --device cuda
+python scripts/evaluate_market1501.py --device cuda
 ~~~
 
 The verified epoch-60 result is **64.50% mAP, 83.97% Rank-1, 94.12% Rank-5,
@@ -210,7 +214,7 @@ red marks an incorrect identity. Re-run metrics and visualizations without GPU
 inference by reusing artifacts whose dataset and checkpoint provenance matches:
 
 ~~~powershell
-& python scripts/evaluate_market1501.py --reuse-embeddings
+python scripts/evaluate_market1501.py --reuse-embeddings
 ~~~
 
 If either the dataset location or checkpoint SHA-256 differs, reuse fails closed
@@ -244,7 +248,7 @@ instance, validates person crops, draws camera-local IDs, and writes an annotate
 video plus JSON runtime summary:
 
 ~~~powershell
-& python scripts/run_single_camera.py `
+python scripts/run_single_camera.py `
   --source path/to/input.mp4 `
   --output outputs/stage3/annotated.mp4 `
   --camera-id C1 `
@@ -406,9 +410,9 @@ gate:
 python -m pytest tests/unit/test_tracklet_embeddings.py --no-cov
 ~~~
 
-## Run Stage 5 EPFL Laboratory C0/C1 Replay
+## Run Stage 5 EPFL Laboratory C0/C1 Replay (Historical Overlap Diagnostic)
 
-Stage 5 uses the EPFL Laboratory six-person sequence as the primary real
+The original Stage 5 used the EPFL Laboratory six-person sequence as its primary real
 multi-camera input. It contains four synchronized ordinary-perspective videos of
 the same room, with people entering sequentially rather than appearing as a
 crowd. The default C0/C1 subset is about 156 MB and is deliberately chosen for
@@ -467,7 +471,7 @@ The older WILDTRACK downloader and runner remain available as optional crowd
 stress-test tools. Their 2.06 GiB local download was removed after this migration
 and can be recovered by rerunning `scripts/download_wildtrack.py`.
 
-## Run Stage 6 Global Association
+## Run Stage 6 Global Association (Historical EPFL Overlap Diagnostic)
 
 Stage 6 is the first complete multi-camera Re-ID pipeline. For every synchronized
 instant it runs:
@@ -539,7 +543,7 @@ global_id = result.assignments[track_key]
 That separation matters for Stage 8: the EPFL source can be replaced by two
 IP-camera workers while the association policy and global registry stay the same.
 
-## Run Stage 7 Evaluation
+## Run Stage 7 Evaluation (Historical EPFL Overlap Diagnostic)
 
 Stage 7 does not train another model and does not alter Stage 6 IDs. It is an
 offline measurement module: it takes `assignments.jsonl` from a completed Stage
@@ -609,7 +613,7 @@ local network. Android IP Webcam commonly displays an address such as
 Validate configuration without opening models or cameras:
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+python main_camera_demo.py `
   --mode solo `
   --camera-url PHONE=http://192.168.1.23:8080/video `
   --dry-run
@@ -618,7 +622,7 @@ Validate configuration without opening models or cameras:
 Run the one-person phone plus laptop demonstration:
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+python main_camera_demo.py `
   --mode solo `
   --camera-url PHONE=http://192.168.1.23:8080/video `
   --webcam-index 0
@@ -628,7 +632,7 @@ If Windows exposes the laptop camera under another index, try
 `--webcam-index 1`. For a multi-IP session:
 
 ~~~powershell
-& 'C:\Users\ADMIN\ai_venv\Scripts\python.exe' main_camera_demo.py `
+python main_camera_demo.py `
   --mode multi_ip `
   --camera-url PHONE_A=http://192.168.1.23:8080/video `
   --camera-url PHONE_B=http://192.168.1.24:8080/video
@@ -650,6 +654,126 @@ loop consumes only each worker's newest frame, so a slow network stream cannot
 build an unbounded queue. A 0.75-second window limits cached observation freshness.
 It does not limit time spent travelling between cameras: the identity gallery
 retention controls that. `det` is detection confidence, not a Re-ID probability.
+
+## WiseNET handoff test
+
+Run the existing YOLO + ByteTrack + trained OSNet + handoff gallery on full-scene
+WiseNET Set 2 videos (default cameras 3/4). Labels are loaded only after inference
+for evaluation; they never determine predicted identities.
+
+~~~powershell
+python main_wisenet_test.py `
+  --output-dir outputs/handoff/wisenet_set2_run2
+~~~
+
+Choose a new output directory on each run; previous predictions are never silently
+overwritten. Add `--show` for a preview at processing speed, `--stride 3` for 10 FPS,
+or `--start 15 --end 90` for a shorter source interval. Default stride 6 processes
+5 FPS per camera while retaining original timestamps and background frames.
+The input uses the local `data/wisenet_set2/video_set2/` and
+`annotations_set2/people_detection/` layout. Other camera pairs may overlap.
+
+For the four-camera mixed network, explicitly permit simultaneous matching only
+between the views you know overlap:
+
+~~~powershell
+python main_wisenet_test.py `
+  --cameras 2 3 4 5 --overlap 2,3 4,5 `
+  --output-dir outputs/handoff/wisenet_hybrid --show
+~~~
+
+`--overlap` automatically selects **hybrid** association. Pairs are bidirectional:
+`2,3` equals `3,2`; all other simultaneously occupied pairs remain prohibited.
+Permissions are not transitive: to share one ID among three simultaneous views,
+list all three pairs. No overlap option means the existing strict handoff default
+(unless your config explicitly selects hybrid). `--no-overlap` clears configured
+pairs and restores strict handoff. Use `--dry-run` to validate without inference.
+You must still verify that a doorway/room actually provides shared visibility;
+the program does not infer camera geometry from numbers or dataset labels.
+
+The same option works for live cameras and raw recording replay, using their
+configured IDs instead of WiseNET numbers:
+
+~~~powershell
+python main_camera_demo.py `
+  --mode solo --overlap PHONE,LAPTOP
+python main_handoff_replay.py `
+  --recording recordings/handoff/session_YOUR_SESSION --overlap PHONE,LAPTOP `
+  --output-dir outputs/handoff/hybrid_replay
+~~~
+
+For persistent live configuration, set `models.association_mode: hybrid` and
+`models.overlap_pairs: [[PHONE, LAPTOP]]` in `configs/camera_demo.yaml`. Named pairs
+must reference cameras in the selected live mode. CLI pairs override the config.
+
+Hybrid safeguards: at most one active track per camera per global ID; every
+simultaneously occupied camera pair must be allowed; cosine distance <= 0.25
+(also capped by the handoff threshold); three consecutive accepted comparisons
+on distinct new embedding samples; and ambiguity rejection for both competing
+identities and competing arrivals. A group can perform a non-overlapping handoff
+only after **all** its visible members have departed and time/route gates pass.
+Already-issued IDs can now be reconciled, but only when both identities are
+visible in permitted overlapping cameras. The match must be mutual-best and
+unambiguous, with five accepted comparisons on fresh samples from **both** sides,
+spanning at least one second. The same strict 0.25 overlap threshold applies.
+Current or historically observed same-camera conflicts prohibit merging. The
+smaller ID survives; the obsolete ID is recorded as an alias. Earlier screenshots
+and assignment logs are not rewritten. Use `--no-reconcile` to compare with the
+previous arrival-only policy, or set `models.reconciliation_enabled: false`.
+Overlap thresholds are uncalibrated defaults, not guaranteed accuracy settings.
+Identical-looking people in permitted pairs can still be falsely joined; topology
+and repeated appearance evidence reduce risk, but do not prove physical identity.
+Duplicate local boxes are a separate tracker issue, not repaired by this policy.
+
+The standalone `association/reconciliation.py` module consumes existing identity
+groups and fresh Stage 4 appearances, returning merge proposals plus decision
+diagnostics. It does not load YOLO/OSNet or open cameras. The Stage 6 registry
+applies approved merges; Stage 8 live/replay callers render the resulting IDs.
+Run its isolated checks with:
+
+~~~powershell
+python -m pytest `
+  tests/unit/test_reconciliation.py --no-cov -q
+~~~
+
+Outputs include `dashboard.mp4` (colored boxes plus Global/Local IDs in black
+panels), `assignments.jsonl`, `handoff_events.jsonl`, `overlap_events.jsonl`,
+`merge_events.jsonl`, `association_decisions.jsonl`, `processed_frames.jsonl`,
+screenshots, `settings.json`,
+`summary.json`, and `evaluation.json`. The first baseline is in
+`outputs/handoff/wisenet_set2/`. To re-score saved predictions without model inference:
+
+~~~powershell
+python main_wisenet_test.py --evaluate-only
+~~~
+
+When re-scoring a custom run, repeat its `--output-dir`, `--cameras`, `--stride`,
+`--start`, and `--end` values. The evaluator uses one-to-one IoU >= 0.5 matching
+against clipped manual boxes, deduplicates cached-view log entries, and separately
+reports prompt recovery (within two seconds), delayed recovery, ID fragmentation,
+shared IDs, and tracked-box coverage. Same-camera recovery events are not counted
+as cross-camera transitions. This is a two-person development diagnostic, not a
+general-purpose benchmark or proof of live phone/laptop performance.
+Simultaneous overlap matches are logged separately and are not counted as
+departure/arrival recoveries. Existing WiseNET transition scoring remains a
+development diagnostic, particularly for mixed overlapping networks.
+
+`association_decisions.jsonl` records candidate distances/thresholds, rejected
+camera pairs, exit/travel waiting, ambiguous candidates, confirmation waiting,
+and accepted reconciliations. It contains no saved OSNet embedding vectors.
+`processed_frames.jsonl` includes empty views too: if you quit with Q/Esc, scoring
+excludes unprocessed footage. Older WiseNET runs are limited using their saved
+per-camera counts and sampling settings; repeat those settings when re-scoring.
+`global_ids_by_person` and continuity scores use original, causal predictions;
+`resolved_global_ids_by_person` and `resolved_shared_global_ids` separately audit
+final aliases, without retroactively making early mistakes disappear.
+
+Verified final untuned reconciliation replay: `outputs/handoff/wisenet_reconciled_final`.
+At 76.0s, C4 Global 3 was reconciled into C5 Global 1 (distance about 0.185).
+The early C2/C3 example remains separate: its measured distances about
+0.324-0.343 exceed the fixed 0.25 threshold. Three IDs were issued historically,
+but only two distinct identities remained after the accepted merge. Duplicate
+C5 tracks can still create/retain splits; this change does not repair the tracker.
 
 ## Cloud Training
 

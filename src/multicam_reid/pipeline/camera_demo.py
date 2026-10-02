@@ -18,6 +18,11 @@ import yaml
 
 from multicam_reid.association import AssociationConfig, GlobalIdentityRegistry
 from multicam_reid.association.handoff import HandoffConfig, HandoffIdentityRegistry
+from multicam_reid.association.topology import (
+    add_overlap_arguments,
+    parse_overlap_pairs,
+    validate_overlap_pairs,
+)
 from multicam_reid.detection.yolo import YoloConfig, YoloPersonDetector
 from multicam_reid.inputs.handoff_recordings import SessionRecorder
 from multicam_reid.inputs.ip_camera import IpCameraConfig, IpCameraWorker
@@ -74,10 +79,18 @@ class DemoModelConfig:
     min_travel_seconds: float = 0.0
     match_margin: float = 0.05
     allowed_transitions: tuple[tuple[str, str], ...] = ()
+    overlap_pairs: tuple[tuple[str, str], ...] = ()
+    overlap_max_cosine_distance: float = 0.25
+    overlap_confirmations: int = 3
+    reconciliation_enabled: bool = True
+    reconciliation_confirmations: int = 5
+    reconciliation_min_seconds: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.association_mode not in {"handoff", "overlap"}:
-            raise ValueError("association_mode must be handoff or overlap")
+        if self.association_mode not in {"handoff", "hybrid", "overlap"}:
+            raise ValueError("association_mode must be handoff, hybrid or overlap")
+        if bool(self.overlap_pairs) != (self.association_mode == "hybrid"):
+            raise ValueError("hybrid mode requires overlap_pairs; other modes require empty pairs")
         if self.device not in {"auto", "cpu", "cuda"}:
             raise ValueError("device must be one of: auto, cpu, cuda")
         if not 0.0 <= self.confidence <= 1.0:
@@ -102,6 +115,12 @@ class DemoModelConfig:
             min_travel_seconds=self.min_travel_seconds,
             match_margin=self.match_margin,
             allowed_transitions=self.allowed_transitions,
+            overlap_pairs=self.overlap_pairs,
+            overlap_max_cosine_distance=self.overlap_max_cosine_distance,
+            overlap_confirmations=self.overlap_confirmations,
+            reconciliation_enabled=self.reconciliation_enabled,
+            reconciliation_confirmations=self.reconciliation_confirmations,
+            reconciliation_min_seconds=self.reconciliation_min_seconds,
         )
 
 
@@ -174,6 +193,7 @@ class CameraDemoConfig:
         camera_ids = [camera.camera_id for camera in self.cameras]
         if len(set(camera_ids)) != len(camera_ids):
             raise ValueError("camera_id values must be unique")
+        validate_overlap_pairs(self.models.overlap_pairs, camera_ids)
         if any(
             source not in camera_ids or target not in camera_ids
             for source, target in self.models.allowed_transitions
@@ -235,6 +255,7 @@ class CameraDemoSummary:
     output_dir: str
     association_mode: str = "handoff"
     handoff_events: int = 0
+    overlap_events: int = 0
     recording_dir: str | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -368,10 +389,9 @@ def load_camera_demo_config(path: Path, *, mode: str | None = None) -> CameraDem
         model_values["detector_model"] = Path(model_values["detector_model"])
     if "checkpoint" in model_values:
         model_values["checkpoint"] = Path(model_values["checkpoint"])
-    if "allowed_transitions" in model_values:
-        model_values["allowed_transitions"] = tuple(
-            tuple(edge) for edge in model_values["allowed_transitions"]
-        )
+    for field_name in ("allowed_transitions", "overlap_pairs"):
+        if field_name in model_values:
+            model_values[field_name] = tuple(tuple(edge) for edge in model_values[field_name])
     runtime_values = _mapping(root.get("runtime"), name="runtime")
     if "output_dir" in runtime_values:
         runtime_values["output_dir"] = Path(runtime_values["output_dir"])
@@ -665,8 +685,36 @@ def build_association_registry(models: DemoModelConfig):
             min_travel_seconds=models.min_travel_seconds,
             match_margin=models.match_margin,
             allowed_transitions=models.allowed_transitions,
+            overlap_pairs=models.overlap_pairs,
+            overlap_max_cosine_distance=models.overlap_max_cosine_distance,
+            overlap_confirmations=models.overlap_confirmations,
+            reconciliation_enabled=models.reconciliation_enabled,
+            reconciliation_confirmations=models.reconciliation_confirmations,
+            reconciliation_min_seconds=models.reconciliation_min_seconds,
         )
     )
+
+
+def with_overlap_overrides(
+    models: DemoModelConfig,
+    values: Sequence[str] | None,
+    camera_ids: Sequence[str],
+    *,
+    numeric: bool = False,
+    reconciliation_enabled: bool | None = None,
+) -> DemoModelConfig:
+    """Opt into pair-scoped hybrid mode, or explicitly clear it with --no-overlap."""
+    if values is not None:
+        pairs = parse_overlap_pairs(values, camera_ids, numeric=numeric)
+        models = replace(
+            models,
+            overlap_pairs=pairs,
+            association_mode="hybrid" if pairs else "handoff",
+        )
+    validate_overlap_pairs(models.overlap_pairs, camera_ids)
+    if reconciliation_enabled is not None:
+        models = replace(models, reconciliation_enabled=reconciliation_enabled)
+    return models
 
 
 def run_camera_demo(
@@ -695,6 +743,7 @@ def run_camera_demo(
     assignments_path = output_dir / "assignments.jsonl"
     events_path = output_dir / "merge_events.jsonl"
     handoff_path = output_dir / "handoff_events.jsonl"
+    overlap_path = output_dir / "overlap_events.jsonl"
     counts = {camera_id: 0 for camera_id in camera_ids}
     last_frame_ids = {camera_id: -1 for camera_id in camera_ids}
     latest_results: dict[str, ReIDProcessedFrame] = {}
@@ -706,6 +755,7 @@ def run_camera_demo(
     association_updates = 0
     merge_count = 0
     handoff_count = 0
+    overlap_count = 0
     started = time.monotonic()
     recorder = (
         SessionRecorder(config.runtime.record_dir, camera_ids)
@@ -725,6 +775,10 @@ def run_camera_demo(
             assignments_path.open("w", encoding="utf-8") as assignments_file,
             events_path.open("w", encoding="utf-8") as events_file,
             handoff_path.open("w", encoding="utf-8") as handoff_file,
+            overlap_path.open("w", encoding="utf-8") as overlap_file,
+            (output_dir / "association_decisions.jsonl").open(
+                "w", encoding="utf-8"
+            ) as decisions_file,
         ):
             while True:
                 received = False
@@ -782,6 +836,16 @@ def run_camera_demo(
                                 now=time.monotonic(),
                                 duration_seconds=4.0,
                             )
+                        for event in association_result.overlap_events:
+                            overlap_file.write(json.dumps(event.to_dict()) + "\n")
+                            overlap_file.flush()
+                            overlap_count += 1
+                            notice.show(
+                                f"Global {event.global_id}: overlap "
+                                f"{event.from_camera} + {event.to_camera}",
+                                now=time.monotonic(),
+                                duration_seconds=4.0,
+                            )
                     else:
                         association_result = association.update(
                             appearances,
@@ -791,6 +855,14 @@ def run_camera_demo(
                     for event in association_result.merge_events:
                         events_file.write(json.dumps(event.to_dict()) + "\n")
                         merge_count += 1
+                        notice.show(
+                            f"Reconciled Global {event.merged_global_id} -> "
+                            f"Global {event.survivor_global_id}",
+                            now=time.monotonic(),
+                            duration_seconds=4.0,
+                        )
+                    for decision in getattr(association_result, "decisions", ()):
+                        decisions_file.write(json.dumps(decision.to_dict()) + "\n")
                     for appearance in appearances:
                         assignments_file.write(
                             json.dumps(
@@ -943,9 +1015,12 @@ def run_camera_demo(
         final_status=_final_status(active_workers),
         output_dir=str(output_dir),
         association_mode=(
-            "handoff" if isinstance(association, HandoffIdentityRegistry) else "overlap"
+            association.association_mode
+            if isinstance(association, HandoffIdentityRegistry)
+            else "overlap"
         ),
         handoff_events=handoff_count,
+        overlap_events=overlap_count,
         recording_dir=str(recorder.directory) if recorder else None,
     )
     (output_dir / "summary.json").write_text(
@@ -972,7 +1047,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--detector-model", type=Path)
     parser.add_argument("--checkpoint", type=Path)
-    parser.add_argument("--association-mode", choices=("handoff", "overlap"))
+    parser.add_argument("--association-mode", choices=("handoff", "hybrid", "overlap"))
+    add_overlap_arguments(parser)
     parser.add_argument("--gallery-ttl-seconds", type=float)
     parser.add_argument(
         "--record-dir",
@@ -1005,6 +1081,7 @@ def _apply_cli_overrides(config: CameraDemoConfig, args: argparse.Namespace) -> 
             "checkpoint": args.checkpoint,
             "association_mode": args.association_mode,
             "gallery_ttl_seconds": args.gallery_ttl_seconds,
+            "reconciliation_enabled": False if args.no_reconcile else None,
         }.items()
         if value is not None
     }
@@ -1018,6 +1095,12 @@ def _apply_cli_overrides(config: CameraDemoConfig, args: argparse.Namespace) -> 
         }.items()
         if value is not None
     }
+    if args.overlap is not None:
+        pairs = parse_overlap_pairs(args.overlap, config.camera_ids)
+        policy = "hybrid" if pairs else "handoff"
+        if args.association_mode is not None and args.association_mode != policy:
+            raise ValueError(f"overlap selection requires --association-mode {policy}")
+        model_updates.update(association_mode=policy, overlap_pairs=pairs)
     models = replace(config.models, **model_updates)
     runtime = replace(config.runtime, **runtime_updates)
     display = replace(config.display, enabled=False) if args.no_display else config.display
